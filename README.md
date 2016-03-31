@@ -35,6 +35,7 @@ model.add(Flatten())
 model.add(Dense(output_dim=64))
 model.add(Activation("relu"))
 model.add(Dense(output_dim=1))
+model.add(Activation("relu"))
 
 ```
 
@@ -45,7 +46,7 @@ model.compile(loss='poisson', optimizer=SGD(lr=0.0001, momentum=0.5, nesterov=Tr
 model.fit(X_train, Y_train, nb_epoch=500, batch_size=512)
 ```
 
-Or generate predictions on new data:
+Once fit you can test the model by predicting on held out data:
 ```python
 pred = model.predict(X_test)
 ```
