@@ -119,7 +119,7 @@ class RMSprop(Optimizer):
         super(RMSprop, self).__init__(**kwargs)
         self.__dict__.update(locals())
         self.lr = K.variable(lr)
-        self.iterations = K.variable(0)
+        self.iterations = K.variable(0.)
         self.rho = K.variable(rho)
         self.decay = K.variable(decay)
         self.momentum = K.variable(momentum)
@@ -130,10 +130,11 @@ class RMSprop(Optimizer):
     def get_updates(self, params, constraints, loss):
         grads = self.get_gradients(loss, params)
         lr = self.lr * (1.0 / (1.0 + self.decay * self.iterations))
-        accumulators = [K.variable(np.zeros(K.get_value(p).shape)) for p in params]
+        # accumulators = [K.variable(np.zeros(K.get_value(p).shape)) for p in params]
+        self.weights = [K.variable(np.zeros(K.get_value(p).shape)) for p in params]
         self.updates = [(self.iterations, self.iterations + 1.)]
 
-        for p, g, a, c in zip(params, grads, accumulators, constraints):
+        for p, g, a in zip(params, grads, self.weights):
             m = K.variable(np.zeros(K.get_value(p).shape))  # momentum
             ada = K.variable(np.ones(K.get_value(p).shape))  # adaptation
             # update accumulator
@@ -153,7 +154,11 @@ class RMSprop(Optimizer):
             else:
                 new_p = p + v
 
-            self.updates.append((p, c(new_p)))  # apply constraints
+            # apply constraints
+            if p in constraints:
+                c = constraints[p]
+                new_p = c(new_p)
+            self.updates.append((p, new_p))
         return self.updates
 
     def get_config(self):
