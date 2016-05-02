@@ -31,9 +31,10 @@ Layers from Keras can then be imported and used
 
 ```python
 from keras.models import Sequential
-from keras.layers.core import TimeDistributedDense, Dense, Flatten, Activation
+from keras.layers.wrappers import TimeDistributed
+from keras.layers.core import Dense, Flatten, Activation
 
-model.add(TimeDistributedDense(output_dim=64, input_shape=(time_delays, 100,))
+model.add(TimeDistributed(Dense(output_dim=64), input_shape=(time_delays, 100,)))
 model.add(Flatten())
 model.add(Dense(output_dim=64))
 model.add(Activation("relu"))
