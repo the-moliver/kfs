@@ -14,7 +14,7 @@ To demonstrate its proper use I've also included a few examples of KFS applied t
 
 ## Getting started: 30 seconds to Keras for Science
 
-The core data structure of Keras is a __model__, a way to organize layers. KFS adds time delays to the standard [`Sequential`](http://keras.io/models/#sequential) model in Keras.
+KFS adds the ability to use arbitrary time delays with the standard [`Sequential`](http://keras.io/models/#sequential) model in Keras. This is accomplished by the use of a generator which creates batches of stimuli of shape `(batch_size, delays, input_dim)` from a data matrix of shape `(samples, input_dim)`
 
 Here's the `time_delay_generator` which automatically generates time delays (i.e. past values of the input):
 
