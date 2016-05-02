@@ -50,7 +50,7 @@ model.compile(loss='poisson', optimizer=SGD(lr=0.0001, momentum=0.5, nesterov=Tr
 model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100)
 ```
 
-Once fit you can test the model by predicting on held out data:
+Once fit you can test the model by predicting on held out data. Set `shuffle` to `False` so the samples are generated in the correct order:
 ```python
 tst_gen = time_delay_generator(X_test, None, delays, batch_size, shuffle=False)
 pred = model.predict_generator(tst_gen, X_test.shape[0])
