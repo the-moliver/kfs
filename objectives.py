@@ -2,12 +2,13 @@ from __future__ import absolute_import
 from keras import backend as K
 
 
-def mean_squared_error(y_true, y_pred):
-    return K.mean(K.square(y_pred - y_true), axis=-1)
-
 
 def cosh(x):
     return .5*(K.exp(x) + K.exp(-x))
+
+
+def logcosh_error(y_true, y_pred):
+	return K.mean(K.log(cosh(y_pred - y_true)), axis=-1)
 
 
 def half_squared_error(y_true, y_pred):
