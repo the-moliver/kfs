@@ -53,7 +53,7 @@ model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100)
 Once fit you can test the model by predicting on held out data:
 ```python
 tst_gen = time_delay_generator(X_test, None, delays, batch_size, shuffle=False)
-pred = model1.predict_generator(tst_gen, X_test.shape[0])
+pred = model.predict_generator(tst_gen, X_test.shape[0])
 ```
 Check the [examples folder](https://github.com/the-moliver/kfs/tree/master/examples) of the repo for more examples
 
