@@ -16,21 +16,24 @@ To demonstrate its proper use I've also included a few examples of KFS applied t
 
 The core data structure of Keras is a __model__, a way to organize layers. KFS adds time delays to the standard [`Sequential`](http://keras.io/models/#sequential) model in Keras.
 
-Here's the `Sequential` model with time delays (i.e. past values of the input):
+Here's the `time_delay_generator` which automatically generates time delays (i.e. past values of the input):
 
 ```python
-from kfs.tdmodels import Sequential
+from kfs.generators import time_delay_generator
 
 time_delays = 10
-model = Sequential(delays=time_delays)
+batch_size = 128
+train_gen = time_delay_generator(X_train, Y_train, delays, batch_size)
+
 ```
 
-Layers from Keras can then be imported and used. Note the input shape includes ```time_delays+1``` because it includes the current time in addition to ```time_delays```
+Layers from Keras can then be imported and used
 
 ```python
+from keras.models import Sequential
 from keras.layers.core import TimeDistributedDense, Dense, Flatten, Activation
 
-model.add(TimeDistributedDense(output_dim=64, input_shape=(time_delays+1, 100,))
+model.add(TimeDistributedDense(output_dim=64, input_shape=(time_delays, 100,))
 model.add(Flatten())
 model.add(Dense(output_dim=64))
 model.add(Activation("relu"))
@@ -43,12 +46,13 @@ Once your model is complete, it can be compiled and fit:
 ```python
 from keras.optimizers import SGD
 model.compile(loss='poisson', optimizer=SGD(lr=0.0001, momentum=0.5, nesterov=True))
-model.fit(X_train, Y_train, nb_epoch=500, batch_size=512)
+model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100)
 ```
 
 Once fit you can test the model by predicting on held out data:
 ```python
-pred = model.predict(X_test)
+tst_gen = time_delay_generator(X_test, None, delays, batch_size, shuffle=False)
+pred = model1.predict_generator(tst_gen, X_test.shape[0])
 ```
 Check the [examples folder](https://github.com/the-moliver/kfs/tree/master/examples) of the repo for more examples
 
