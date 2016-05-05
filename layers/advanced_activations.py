@@ -33,12 +33,18 @@ class ParametricSoftplus(Layer):
 
     def build(self, input_shape):
         input_shape = input_shape[1:]
-        self.alphas = K.variable(self.alpha_init * np.ones(input_shape),
-                                 name='{}_alphas'.format(self.name))
-        self.betas = K.variable(self.beta_init * np.ones(input_shape),
-                                name='{}_betas'.format(self.name))
+
         if self.fit:
+            self.alphas = K.variable(self.alpha_init * np.ones(input_shape),
+                                 name='{}_alphas'.format(self.name))
+            self.betas = K.variable(self.beta_init * np.ones(input_shape),
+                                name='{}_betas'.format(self.name))
             self.trainable_weights = [self.alphas, self.betas]
+        else:
+            self.alphas = K.variable(self.alpha_init,
+                                 name='{}_alphas'.format(self.name))
+            self.betas = K.variable(self.beta_init,
+                                name='{}_betas'.format(self.name))
 
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
