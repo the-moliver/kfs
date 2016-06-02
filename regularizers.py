@@ -17,7 +17,7 @@ class XCovWeightRegularizer(Regularizer):
             p = p.T
 
         # p -= K.mean(p, axis=0)
-        pen = .5*K.sum(K.sqr(K.dot(p.T, p)/p.shape[0]))
+        pen = .5*K.sum(K.square(K.dot(p.T, p)/p.shape[0]))
         loss += pen * self.l
         return loss
 
@@ -54,7 +54,7 @@ class OrthogonalActivityRegularizer(Regularizer):
     def __call__(self, loss):
         output = self.layer.get_output(True)
         output -= K.mean(output, axis=0)
-        pen = K.sum(K.sqr(K.dot(output.T, output)/output.shape[0]))
+        pen = K.sum(K.square(K.dot(output.T, output)/output.shape[0]))
         loss += self.gamma*pen
         return loss
 
@@ -74,7 +74,7 @@ class XCovActivityRegularizer(Regularizer):
     def __call__(self, loss):
         output = self.layer.get_output(True)
         output -= K.mean(output, axis=0)
-        pen = .5*K.sum(K.sqr(K.dot(output[:, :self.dividx].T, output[:, self.dividx:])/output.shape[0]))
+        pen = .5*K.sum(K.square(K.dot(output[:, :self.dividx].T, output[:, self.dividx:])/output.shape[0]))
         loss += self.gamma*pen
         return loss
 
@@ -87,14 +87,15 @@ class LaplacianWeightRegularizer(Regularizer):
     def __init__(self, l1=0., l2=0.):
         self.l1 = l1
         self.l2 = l2
+        self.uses_learning_phase = True
 
     def set_param(self, p):
         self.p = p
 
     def __call__(self, loss):
-        loss += K.sum(abs(laplacian1d(self.p))) * self.l1
-        loss += K.sum(laplacian1d(self.p) ** 2) * self.l2
-        return loss
+        regularized_loss = loss + K.sum(abs(laplacian1d(self.p))) * self.l1
+        regularized_loss += K.sum(laplacian1d(self.p) ** 2) * self.l2
+        return K.in_train_phase(regularized_loss, loss)
 
     def get_config(self):
         return {"name": self.__class__.__name__,
@@ -103,23 +104,38 @@ class LaplacianWeightRegularizer(Regularizer):
 
 
 class TVWeightRegularizer(Regularizer):
-    def __init__(self, TV=0., TV2=0., row=1, col=1):
+    def __init__(self, TV=0., TV2=0., rows=1, columns=1, colors=1):
         self.TV = TV
         self.TV2 = TV2
-        self.row = row
-        self.col = col
+        self.rows = rows
+        self.columns = columns
+        self.colors = colors
+        self.uses_learning_phase = True
 
     def set_param(self, p):
         self.p = p
 
     def __call__(self, loss):
-        p = K.reshape(self.p, (self.row, self.row, self.p.shape[1]))
-        pen1 = K.sum(K.sqrt(K.square(diffr(p)) + K.sqr(diffc(p)) + K.epsilon()), axis=(0, 1))
-        pen2 = K.sum(K.sqrt(K.square(diffrr(p)) + K.sqr(diffcc(p)) + 2*K.sqr(diffrc(p)) + K.epsilon()), axis=(0, 1))
+        p = K.reshape(self.p, (self.colors, self.rows, self.columns, self.p.shape[1]))
 
-        loss += pen1.sum() * self.TV
-        loss += pen2.sum() * self.TV2
-        return loss
+        pen1 = K.sum(K.sqrt(K.square(diffr(p[0])) + K.square(diffc(p[0])) + K.epsilon()), axis=(0, 1))
+        pen2 = K.sum(K.sqrt(K.square(diffrr(p[0])) + K.square(diffcc(p[0])) + 2*K.square(diffrc(p[0])) + K.epsilon()), axis=(0, 1))
+
+        regularized_loss = loss + pen1.sum() * self.TV
+        regularized_loss += pen2.sum() * self.TV2
+
+        if self.colors is 3:
+            pen3 = K.sum(K.sqrt(K.square(diffr(p[1])) + K.square(diffc(p[1])) + K.epsilon()), axis=(0, 1))
+            pen4 = K.sum(K.sqrt(K.square(diffrr(p[1])) + K.square(diffcc(p[1])) + 2*K.square(diffrc(p[1])) + K.epsilon()), axis=(0, 1))
+            pen5 = K.sum(K.sqrt(K.square(diffr(p[2])) + K.square(diffc(p[2])) + K.epsilon()), axis=(0, 1))
+            pen6 = K.sum(K.sqrt(K.square(diffrr(p[2])) + K.square(diffcc(p[2])) + 2*K.square(diffrc(p[2])) + K.epsilon()), axis=(0, 1))
+
+            regularized_loss += pen3.sum() * self.TV
+            regularized_loss += pen4.sum() * self.TV2
+            regularized_loss += pen5.sum() * self.TV
+            regularized_loss += pen6.sum() * self.TV2
+
+        return K.in_train_phase(regularized_loss, loss)
 
     def get_config(self):
         return {"name": self.__class__.__name__,
@@ -139,14 +155,14 @@ def laplacian1d(X):
 
 
 def diffc(X):
-    Xout = K.zeros(X.shape)
+    Xout = K.zeros(X.shape.eval())
     Xout = K.set_subtensor(Xout[:,1:-1], X[:,2:] - X[:,:-2])
     Xout = K.set_subtensor(Xout[:,0], X[:,1] - X[:,0])
     Xout = K.set_subtensor(Xout[:,-1], X[:,-1] - X[:,-2])
     return Xout/2
 
 def diffr(X):
-    Xout = K.zeros(X.shape)
+    Xout = K.zeros(X.shape.eval())
     Xout = K.set_subtensor(Xout[1:-1,:], X[2:,:] - X[:-2,:])
     Xout = K.set_subtensor(Xout[0,:], X[1,:] - X[0,:])
     Xout = K.set_subtensor(Xout[-1,:], X[-1,:] - X[-2,:])
@@ -154,21 +170,21 @@ def diffr(X):
 
 
 def diffcc(X):
-    Xout = K.zeros(X.shape)
+    Xout = K.zeros(X.shape.eval())
     Xout = K.set_subtensor(Xout[:,1:-1], X[:,2:] + X[:,:-2])
     Xout = K.set_subtensor(Xout[:,0], X[:,1] + X[:,0])
     Xout = K.set_subtensor(Xout[:,-1], X[:,-1] + X[:,-2])
     return Xout - 2*X
 
 def diffrr(X):
-    Xout = K.zeros(X.shape)
+    Xout = K.zeros(X.shape.eval())
     Xout = K.set_subtensor(Xout[1:-1,:], X[2:,:] + X[:-2,:])
     Xout = K.set_subtensor(Xout[0,:], X[1,:] + X[0,:])
     Xout = K.set_subtensor(Xout[-1,:], X[-1,:] + X[-2,:])
     return Xout - 2*X
 
 def diffrc(X):
-    Xout1 = K.zeros(X.shape)
+    Xout1 = K.zeros(X.shape.eval())
     Xout1 = K.set_subtensor(Xout1[1:-1,1:-1], X[2:,2:]+X[:-2,:-2])
     Xout1 = K.set_subtensor(Xout1[0,0], X[1,1]+X[0,0])
     Xout1 = K.set_subtensor(Xout1[0,1:-1], X[1,2:]+X[0,:-2])
@@ -180,7 +196,7 @@ def diffrc(X):
     Xout1 = K.set_subtensor(Xout1[1:-1,0], X[2:,1]+X[:-2,0])
 
 
-    Xout2 = K.zeros(X.shape)
+    Xout2 = K.zeros(X.shape.eval())
     Xout2 = K.set_subtensor(Xout2[1:-1,1:-1], X[:-2,2:]+X[2:,:-2])
     Xout2 = K.set_subtensor(Xout2[0,0], X[0,1]+X[1,0])
     Xout2 = K.set_subtensor(Xout2[0,1:-1], X[0,2:]+X[1,:-2])
