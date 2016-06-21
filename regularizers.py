@@ -1,7 +1,9 @@
 from __future__ import absolute_import
 from keras import backend as K
 from keras.regularizers import Regularizer
-
+import theano
+import numpy as np
+from theano import tensor as T
 
 class XCovWeightRegularizer(Regularizer):
     def __init__(self, l=1., axis=0):
@@ -156,56 +158,56 @@ def laplacian1d(X):
 
 def diffc(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = K.set_subtensor(Xout[:,1:-1], X[:,2:] - X[:,:-2])
-    Xout = K.set_subtensor(Xout[:,0], X[:,1] - X[:,0])
-    Xout = K.set_subtensor(Xout[:,-1], X[:,-1] - X[:,-2])
+    Xout = T.set_subtensor(Xout[:,1:-1], X[:,2:] - X[:,:-2])
+    Xout = T.set_subtensor(Xout[:,0], X[:,1] - X[:,0])
+    Xout = T.set_subtensor(Xout[:,-1], X[:,-1] - X[:,-2])
     return Xout/2
 
 def diffr(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = K.set_subtensor(Xout[1:-1,:], X[2:,:] - X[:-2,:])
-    Xout = K.set_subtensor(Xout[0,:], X[1,:] - X[0,:])
-    Xout = K.set_subtensor(Xout[-1,:], X[-1,:] - X[-2,:])
+    Xout = T.set_subtensor(Xout[1:-1,:], X[2:,:] - X[:-2,:])
+    Xout = T.set_subtensor(Xout[0,:], X[1,:] - X[0,:])
+    Xout = T.set_subtensor(Xout[-1,:], X[-1,:] - X[-2,:])
     return Xout/2
 
 
 def diffcc(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = K.set_subtensor(Xout[:,1:-1], X[:,2:] + X[:,:-2])
-    Xout = K.set_subtensor(Xout[:,0], X[:,1] + X[:,0])
-    Xout = K.set_subtensor(Xout[:,-1], X[:,-1] + X[:,-2])
+    Xout = T.set_subtensor(Xout[:,1:-1], X[:,2:] + X[:,:-2])
+    Xout = T.set_subtensor(Xout[:,0], X[:,1] + X[:,0])
+    Xout = T.set_subtensor(Xout[:,-1], X[:,-1] + X[:,-2])
     return Xout - 2*X
 
 def diffrr(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = K.set_subtensor(Xout[1:-1,:], X[2:,:] + X[:-2,:])
-    Xout = K.set_subtensor(Xout[0,:], X[1,:] + X[0,:])
-    Xout = K.set_subtensor(Xout[-1,:], X[-1,:] + X[-2,:])
+    Xout = T.set_subtensor(Xout[1:-1,:], X[2:,:] + X[:-2,:])
+    Xout = T.set_subtensor(Xout[0,:], X[1,:] + X[0,:])
+    Xout = T.set_subtensor(Xout[-1,:], X[-1,:] + X[-2,:])
     return Xout - 2*X
 
 def diffrc(X):
     Xout1 = K.zeros(X.shape.eval())
-    Xout1 = K.set_subtensor(Xout1[1:-1,1:-1], X[2:,2:]+X[:-2,:-2])
-    Xout1 = K.set_subtensor(Xout1[0,0], X[1,1]+X[0,0])
-    Xout1 = K.set_subtensor(Xout1[0,1:-1], X[1,2:]+X[0,:-2])
-    Xout1 = K.set_subtensor(Xout1[0,-1], X[1,-1]+X[0,-2])
-    Xout1 = K.set_subtensor(Xout1[1:-1,-1], X[2:,-1]+X[:-2,-2])
-    Xout1 = K.set_subtensor(Xout1[-1,-1], X[-1,-1]+X[-2,-2])
-    Xout1 = K.set_subtensor(Xout1[-1,1:-1], X[-1,2:]+X[-2,:-2])
-    Xout1 = K.set_subtensor(Xout1[-1,0], X[-1,1]+X[-2,0])
-    Xout1 = K.set_subtensor(Xout1[1:-1,0], X[2:,1]+X[:-2,0])
+    Xout1 = T.set_subtensor(Xout1[1:-1,1:-1], X[2:,2:]+X[:-2,:-2])
+    Xout1 = T.set_subtensor(Xout1[0,0], X[1,1]+X[0,0])
+    Xout1 = T.set_subtensor(Xout1[0,1:-1], X[1,2:]+X[0,:-2])
+    Xout1 = T.set_subtensor(Xout1[0,-1], X[1,-1]+X[0,-2])
+    Xout1 = T.set_subtensor(Xout1[1:-1,-1], X[2:,-1]+X[:-2,-2])
+    Xout1 = T.set_subtensor(Xout1[-1,-1], X[-1,-1]+X[-2,-2])
+    Xout1 = T.set_subtensor(Xout1[-1,1:-1], X[-1,2:]+X[-2,:-2])
+    Xout1 = T.set_subtensor(Xout1[-1,0], X[-1,1]+X[-2,0])
+    Xout1 = T.set_subtensor(Xout1[1:-1,0], X[2:,1]+X[:-2,0])
 
 
     Xout2 = K.zeros(X.shape.eval())
-    Xout2 = K.set_subtensor(Xout2[1:-1,1:-1], X[:-2,2:]+X[2:,:-2])
-    Xout2 = K.set_subtensor(Xout2[0,0], X[0,1]+X[1,0])
-    Xout2 = K.set_subtensor(Xout2[0,1:-1], X[0,2:]+X[1,:-2])
-    Xout2 = K.set_subtensor(Xout2[0,-1], X[0,-1]+X[1,-2])
-    Xout2 = K.set_subtensor(Xout2[1:-1,-1], X[:-2,-1]+X[2:,-2])
-    Xout2 = K.set_subtensor(Xout2[-1,-1], X[-2,-1]+X[-1,-2])
-    Xout2 = K.set_subtensor(Xout2[-1,1:-1], X[-2,2:]+X[-1,:-2])
-    Xout2 = K.set_subtensor(Xout2[-1,0], X[-2,1]+X[-1,0])
-    Xout2 = K.set_subtensor(Xout2[1:-1,0], X[:-2,1]+X[2:,0])
+    Xout2 = T.set_subtensor(Xout2[1:-1,1:-1], X[:-2,2:]+X[2:,:-2])
+    Xout2 = T.set_subtensor(Xout2[0,0], X[0,1]+X[1,0])
+    Xout2 = T.set_subtensor(Xout2[0,1:-1], X[0,2:]+X[1,:-2])
+    Xout2 = T.set_subtensor(Xout2[0,-1], X[0,-1]+X[1,-2])
+    Xout2 = T.set_subtensor(Xout2[1:-1,-1], X[:-2,-1]+X[2:,-2])
+    Xout2 = T.set_subtensor(Xout2[-1,-1], X[-2,-1]+X[-1,-2])
+    Xout2 = T.set_subtensor(Xout2[-1,1:-1], X[-2,2:]+X[-1,:-2])
+    Xout2 = T.set_subtensor(Xout2[-1,0], X[-2,1]+X[-1,0])
+    Xout2 = T.set_subtensor(Xout2[1:-1,0], X[:-2,1]+X[2:,0])
 
     return (Xout1 - Xout2)/4
 
