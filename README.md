@@ -1,6 +1,6 @@
 # Keras for Science (KFS)
 
-Keras for Science (KFS) is a set of extensions to the excellent [Keras](https://github.com/chollet/keras) neural network library.
+Keras for Science (KFS) is a set of extensions to the excellent [Keras](https://github.com/fchollet/keras) neural network library.
 
 Most of the deep learning literature has focused on classification problems, while many problems in science are actually regression problems. Also scientific data is often significantly smaller (in terms of number of samples) and more noisy than the data typically used in deep learning. I've been using deep learning for several years now to model data recorded from neurons in visual cortex. I created these extensions to Keras to make the lessons I've learned applying deep learning to scientific problems easily accessible.
 
