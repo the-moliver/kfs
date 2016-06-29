@@ -144,6 +144,45 @@ class TVWeightRegularizer(Regularizer):
                 "TV": self.TV,
                 "TV2": self.TV2}
 
+
+class TVWeightRegularizer2d(Regularizer):
+    def __init__(self, TV=0., TV2=0.):
+        self.TV = TV
+        self.TV2 = TV2
+        self.uses_learning_phase = True
+
+    def set_param(self, p):
+        self.p = p
+
+    def __call__(self, loss):
+        if K.ndim(self.p) == 3:
+            p = K.reshape(self.p, (1, self.p.shape[0], self.p.shape[1], self.p.shape[2]))
+
+        pen1 = K.sum(K.sqrt(K.square(diffr(p[0])) + K.square(diffc(p[0])) + K.epsilon()), axis=(0, 1))
+        pen2 = K.sum(K.sqrt(K.square(diffrr(p[0])) + K.square(diffcc(p[0])) + 2*K.square(diffrc(p[0])) + K.epsilon()), axis=(0, 1))
+
+        regularized_loss = loss + pen1.sum() * self.TV
+        regularized_loss += pen2.sum() * self.TV2
+
+        if p.shape[0] is 3:
+            pen3 = K.sum(K.sqrt(K.square(diffr(p[1])) + K.square(diffc(p[1])) + K.epsilon()), axis=(0, 1))
+            pen4 = K.sum(K.sqrt(K.square(diffrr(p[1])) + K.square(diffcc(p[1])) + 2*K.square(diffrc(p[1])) + K.epsilon()), axis=(0, 1))
+            pen5 = K.sum(K.sqrt(K.square(diffr(p[2])) + K.square(diffc(p[2])) + K.epsilon()), axis=(0, 1))
+            pen6 = K.sum(K.sqrt(K.square(diffrr(p[2])) + K.square(diffcc(p[2])) + 2*K.square(diffrc(p[2])) + K.epsilon()), axis=(0, 1))
+
+            regularized_loss += pen3.sum() * self.TV
+            regularized_loss += pen4.sum() * self.TV2
+            regularized_loss += pen5.sum() * self.TV
+            regularized_loss += pen6.sum() * self.TV2
+
+        return K.in_train_phase(regularized_loss, loss)
+
+    def get_config(self):
+        return {"name": self.__class__.__name__,
+                "TV": self.TV,
+                "TV2": self.TV2}
+
+
 def laplacian_l2(l=0.01):
     return LaplacianWeightRegularizer(l2=l)
 

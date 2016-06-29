@@ -4,9 +4,9 @@ from __future__ import absolute_import
 from keras import backend as K
 from keras import activations, initializations, regularizers
 from kfs import constraints
-from keras.layers.core import Layer
+from keras.engine import Layer, InputSpec
 import numpy as np
-
+import theano.tensor as T
 
 def conv_output_length(input_length, filter_size, border_mode, stride):
     if input_length is None:
@@ -569,79 +569,13 @@ class Convolution2DEnergy(Layer):
         base_config = super(Convolution2DEnergy, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+
 class Convolution2DColorEnergy_DelayBasis6(Layer):
-    '''Convolution operator for filtering windows of two-dimensional inputs.
-    When using this layer as the first layer in a model,
-    provide the keyword argument `input_shape`
-    (tuple of integers, does not include the sample axis),
-    e.g. `input_shape=(3, 128, 128)` for 128x128 RGB pictures.
-
-    # Examples
-
-    ```python
-        # apply a 3x3 convolution with 64 output filters on a 256x256 image:
-        model = Sequential()
-        model.add(Convolution2D(64, 3, 3, border_mode='same', input_shape=(3, 256, 256)))
-        # now model.output_shape == (None, 64, 256, 256)
-
-        # add a 3x3 convolution on top, with 32 output filters:
-        model.add(Convolution2D(32, 3, 3, border_mode='same'))
-        # now model.output_shape == (None, 32, 256, 256)
-    ```
-
-    # Arguments
-        nb_filter: Number of convolution filters to use.
-        nb_row: Number of rows in the convolution kernel.
-        nb_col: Number of columns in the convolution kernel.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)), or alternatively,
-            Theano function to use for weights initialization.
-            This parameter is only relevant if you don't pass
-            a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of numpy arrays to set as initial weights.
-        border_mode: 'valid' or 'same'.
-        subsample: tuple of length 2. Factor by which to subsample output.
-            Also called strides elsewhere.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        dim_ordering: 'th' or 'tf'. In 'th' mode, the channels dimension
-            (the depth) is at index 1, in 'tf' mode is it at index 3.
-            It defaults to the `image_dim_ordering` value found in your
-            Keras config file at `~/.keras/keras.json`.
-            If you never set it, then it will be "th".
-        bias: whether to include a bias (i.e. make the layer affine rather than linear).
-
-    # Input shape
-        4D tensor with shape:
-        `(samples, channels, rows, cols)` if dim_ordering='th'
-        or 4D tensor with shape:
-        `(samples, rows, cols, channels)` if dim_ordering='tf'.
-
-    # Output shape
-        4D tensor with shape:
-        `(samples, nb_filter, new_rows, new_cols)` if dim_ordering='th'
-        or 4D tensor with shape:
-        `(samples, new_rows, new_cols, nb_filter)` if dim_ordering='tf'.
-        `rows` and `cols` values might have changed due to padding.
-    '''
     def __init__(self, nb_filter, nb_row, nb_col, delays, delay_basis, t_feats,
                  init='glorot_uniform', activation='linear', weights=None,
                  border_mode='valid', subsample=(1, 1), dim_ordering=K.image_dim_ordering(),
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None,
+                 W_regularizer=None, Wt_regularizer=None, Wm_regularizer=None, b_regularizer=None, activity_regularizer=None,
+                 W_constraint=None, Wt_constraint=None, Wm_constraint=None, b_constraint=None,
                  bias=True, **kwargs):
 
         if border_mode not in {'valid', 'same'}:
@@ -661,10 +595,14 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
         self.dim_ordering = dim_ordering
 
         self.W_regularizer = regularizers.get(W_regularizer)
+        self.Wt_regularizer = regularizers.get(Wt_regularizer)
+        self.Wm_regularizer = regularizers.get(Wm_regularizer)
         self.b_regularizer = regularizers.get(b_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.W_constraint = constraints.get(W_constraint)
+        self.W_constraint = constraints.UnitNormOrthogonal(nb_filter+1)
+        self.Wt_constraint = constraints.get(Wt_constraint)
+        self.Wm_constraint = constraints.get(Wm_constraint)
         self.b_constraint = constraints.get(b_constraint)
 
         self.bias = bias
@@ -675,7 +613,7 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
     def build(self, input_shape):
         if self.dim_ordering == 'th':
             # stack_size = input_shape[2]
-            self.W_shape = (2*(self.nb_filter+1), 1, 3, self.nb_row, self.nb_col)
+            self.W_shape = (2*(self.nb_filter+1), 3, 1, self.nb_row, self.nb_col)
         elif self.dim_ordering == 'tf':
             # stack_size = input_shape[4]
             self.W_shape = (self.nb_row, self.nb_col, 3, 1, (self.nb_filter+1)*2)
@@ -707,8 +645,12 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
             self.regularizers.append(self.activity_regularizer)
 
         self.constraints = {}
-        # if self.W_constraint:
-        self.constraints[self.W] = constraints.UnitNormOrthogonal(self.nb_row*self.nb_col*3, axis=1)
+        if self.W_constraint:
+            self.constraints[self.W] = self.W_constraint
+        if self.Wt_constraint:
+            self.constraints[self.Wt] = self.Wt_constraint
+        if self.Wm_constraint:
+            self.constraints[self.Wm] = self.Wm_constraint
         if self.bias and self.b_constraint:
             self.constraints[self.b] = self.b_constraint
 
@@ -718,23 +660,27 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
 
     def get_output_shape_for(self, input_shape):
         if self.dim_ordering == 'th':
-            rows = input_shape[2]
-            cols = input_shape[3]
+            # conv_dim1 = input_shape[1]
+            conv_dim2 = input_shape[3]
+            conv_dim3 = input_shape[4]
         elif self.dim_ordering == 'tf':
-            rows = input_shape[1]
-            cols = input_shape[2]
+            # conv_dim1 = input_shape[1]
+            conv_dim2 = input_shape[2]
+            conv_dim3 = input_shape[3]
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
 
-        rows = conv_output_length(rows, self.nb_row,
-                                  self.border_mode, self.subsample[0])
-        cols = conv_output_length(cols, self.nb_col,
-                                  self.border_mode, self.subsample[1])
+        # conv_dim1 = conv_output_length(conv_dim1, 1,
+        #                                self.border_mode, self.subsample[0])
+        conv_dim2 = conv_output_length(conv_dim2, self.nb_row,
+                                       self.border_mode, self.subsample[1])
+        conv_dim3 = conv_output_length(conv_dim3, self.nb_col,
+                                       self.border_mode, self.subsample[2])
 
         if self.dim_ordering == 'th':
-            return (input_shape[0], self.nb_filter, rows, cols)
+            return (input_shape[0], (self.nb_filter+1)*self.t_feats, 1, conv_dim2, conv_dim3)
         elif self.dim_ordering == 'tf':
-            return (input_shape[0], rows, cols, self.nb_filter)
+            return (input_shape[0], self.t_feats, conv_dim2, conv_dim3, self.nb_filter)
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
 
@@ -746,27 +692,27 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
                           volume_shape=input_shape,
                           filter_shape=self.W_shape)
 
-        conv_out1 = K.dot(output.dimshuffle(0, 2, 3, 4, 1), self.Wt)
+        conv_out1 = K.dot(output.dimshuffle(0, 1, 3, 4, 2), self.Wt)
 
         W1m = self.Wm[:self.nb_filter, :, :self.t_feats]
         W2m = self.Wm[:self.nb_filter, :, self.t_feats:]
         W3m = self.Wm[self.nb_filter:, :, :self.t_feats]
         W4m = self.Wm[self.nb_filter:, :, self.t_feats:]
 
-        conv_out12 = K.concatenate([conv_out1[:, :self.nb_filter, :, :, :], conv_out1[:, self.nb_filter:2*self.nb_filter, :, :, :]], axis=4).transpose(1, 4, 0, 2, 3)
-        conv_out34 = K.concatenate([conv_out1[:, 2*self.nb_filter:(1+2*self.nb_filter), :, :, :], conv_out1[:, (1+2*self.nb_filter):(2+2*self.nb_filter), :, :, :]], axis=4).transpose(1, 4, 0, 2, 3)
+        conv_out12 = K.concatenate([conv_out1[:, :self.nb_filter, :, :, :], conv_out1[:, (self.nb_filter+1):(1+2*self.nb_filter), :, :, :]], axis=4).transpose(1, 4, 0, 2, 3)
+        conv_out34 = K.concatenate([conv_out1[:, self.nb_filter:(self.nb_filter+1), :, :, :], conv_out1[:, (1+2*self.nb_filter):(2+2*self.nb_filter), :, :, :]], axis=4).transpose(1, 4, 0, 2, 3)
 
-        conv_out = K.sqrt(K.square(K.batched_tensordot(conv_out12, W1m, axes=(1, 1))) + K.square(K.batched_tensordot(conv_out12, W2m, axes=(1, 1)))+K.eps()).dimshuffle(1, 4, 0, 2, 3)
-        conv_outlin = (K.batched_tensordot(conv_out34, W3m, axes=(1, 1)) + K.batched_tensordot(conv_out34, W4m, axes=(1, 1))).dimshuffle(1, 4, 0, 2, 3)
+        conv_out = K.sqrt(K.square(T.batched_tensordot(conv_out12, W1m, axes=(1, 1))) + K.square(T.batched_tensordot(conv_out12, W2m, axes=(1, 1)))+K.epsilon()).dimshuffle(1, 4, 0, 2, 3)
+        conv_outlin = (T.batched_tensordot(conv_out34, W3m, axes=(1, 1)) + T.batched_tensordot(conv_out34, W4m, axes=(1, 1))).dimshuffle(1, 4, 0, 2, 3)
 
         output = K.concatenate([conv_out, conv_outlin], axis=2)
         # samps x t_basis x stack x X x Y
 
         if self.bias:
             if self.dim_ordering == 'th':
-                output += K.reshape(self.b, (1, 1, self.nb_filter, 1, 1))
+                output += K.reshape(self.b, (1, 1, self.nb_filter+1, 1, 1))
             elif self.dim_ordering == 'tf':
-                output += K.reshape(self.b, (1, 1, 1, 1, self.nb_filter))
+                output += K.reshape(self.b, (1, 1, 1, 1, self.nb_filter+1))
             else:
                 raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
         output = self.activation(output)
@@ -792,65 +738,6 @@ class Convolution2DColorEnergy_DelayBasis6(Layer):
 
 
 class Convolution2DEnergy_Delay3(Layer):
-    '''Convolution operator for filtering windows of three-dimensional inputs.
-    When using this layer as the first layer in a model,
-    provide the keyword argument `input_shape`
-    (tuple of integers, does not include the sample axis),
-    e.g. `input_shape=(3, 10, 128, 128)` for 10 frames of 128x128 RGB pictures.
-
-    Note: this layer will only work with Theano for the time being.
-
-    # Arguments
-        nb_filter: Number of convolution filters to use.
-        kernel_dim1: Length of the first dimension in the convolution kernel.
-        kernel_dim2: Length of the second dimension in the convolution kernel.
-        kernel_dim3: Length of the third dimension in the convolution kernel.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)), or alternatively,
-            Theano function to use for weights initialization.
-            This parameter is only relevant if you don't pass
-            a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of Numpy arrays to set as initial weights.
-        border_mode: 'valid' or 'same'.
-        subsample: tuple of length 3. Factor by which to subsample output.
-            Also called strides elsewhere.
-            Note: 'subsample' is implemented by slicing the output of conv3d with strides=(1,1,1).
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        dim_ordering: 'th' or 'tf'. In 'th' mode, the channels dimension
-            (the depth) is at index 1, in 'tf' mode is it at index 4.
-            It defaults to the `image_dim_ordering` value found in your
-            Keras config file at `~/.keras/keras.json`.
-            If you never set it, then it will be "th".
-        bias: whether to include a bias (i.e. make the layer affine rather than linear).
-
-    # Input shape
-        5D tensor with shape:
-        `(samples, channels, conv_dim1, conv_dim2, conv_dim3)` if dim_ordering='th'
-        or 5D tensor with shape:
-        `(samples, conv_dim1, conv_dim2, conv_dim3, channels)` if dim_ordering='tf'.
-
-    # Output shape
-        5D tensor with shape:
-        `(samples, nb_filter, new_conv_dim1, new_conv_dim2, new_conv_dim3)` if dim_ordering='th'
-        or 5D tensor with shape:
-        `(samples, new_conv_dim1, new_conv_dim2, new_conv_dim3, nb_filter)` if dim_ordering='tf'.
-        `new_conv_dim1`, `new_conv_dim2` and `new_conv_dim3` values might have changed due to padding.
-    '''
-
     def __init__(self, nb_filter, nb_row, nb_col,
                  init='glorot_uniform', activation='linear', weights=None,
                  border_mode='valid', subsample=(1, 1, 1), dim_ordering=K.image_dim_ordering(),
@@ -877,7 +764,7 @@ class Convolution2DEnergy_Delay3(Layer):
         self.b_regularizer = regularizers.get(b_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.W_constraint = constraints.get(W_constraint)
+        self.W_constraint = constraints.UnitNormOrthogonal(nb_filter)
         self.b_constraint = constraints.get(b_constraint)
 
         self.bias = bias
@@ -890,19 +777,17 @@ class Convolution2DEnergy_Delay3(Layer):
         self.input_spec = [InputSpec(shape=input_shape)]
 
         if self.dim_ordering == 'th':
-            stack_size = input_shape[1]
             self.W_shape = (2*self.nb_filter+1, 1,
-                            1, self.row, self.col)
+                            1, self.nb_row, self.nb_col)
         elif self.dim_ordering == 'tf':
-            stack_size = input_shape[4]
-            self.W_shape = (self.kernel_dim1, self.kernel_dim2, self.kernel_dim3,
-                            stack_size, self.nb_filter)
+            self.W_shape = (1, self.nb_row, self.nb_col,
+                            1, 2*self.nb_filter+1)
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
 
         self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
         if self.bias:
-            self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
+            self.b = K.zeros((self.nb_filter+1,), name='{}_b'.format(self.name))
             self.trainable_weights = [self.W, self.b]
         else:
             self.trainable_weights = [self.W]
@@ -932,7 +817,7 @@ class Convolution2DEnergy_Delay3(Layer):
 
     def get_output_shape_for(self, input_shape):
         if self.dim_ordering == 'th':
-            conv_dim1 = input_shape[2]
+            conv_dim1 = input_shape[1]
             conv_dim2 = input_shape[3]
             conv_dim3 = input_shape[4]
         elif self.dim_ordering == 'tf':
@@ -942,15 +827,15 @@ class Convolution2DEnergy_Delay3(Layer):
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
 
-        conv_dim1 = conv_output_length(conv_dim1, self.kernel_dim1,
+        conv_dim1 = conv_output_length(conv_dim1, 1,
                                        self.border_mode, self.subsample[0])
-        conv_dim2 = conv_output_length(conv_dim2, self.kernel_dim2,
+        conv_dim2 = conv_output_length(conv_dim2, self.nb_row,
                                        self.border_mode, self.subsample[1])
-        conv_dim3 = conv_output_length(conv_dim3, self.kernel_dim3,
+        conv_dim3 = conv_output_length(conv_dim3, self.nb_col,
                                        self.border_mode, self.subsample[2])
 
         if self.dim_ordering == 'th':
-            return (input_shape[0], self.nb_filter, conv_dim1, conv_dim2, conv_dim3)
+            return (input_shape[0], (self.nb_filter+1)*conv_dim1, 1, conv_dim2, conv_dim3)
         elif self.dim_ordering == 'tf':
             return (input_shape[0], conv_dim1, conv_dim2, conv_dim3, self.nb_filter)
         else:
@@ -958,32 +843,31 @@ class Convolution2DEnergy_Delay3(Layer):
 
     def call(self, x, mask=None):
         input_shape = self.input_spec[0].shape
-        x = K.reshape(x, (input_shape[0], input_shape[1]*input_shape[2], 1, input_shape[3], input_shape[4]))
+        x = K.reshape(x, (-1, 1, input_shape[1]*input_shape[2], input_shape[3], input_shape[4]))
         conv_out = K.conv3d(x, self.W, strides=self.subsample,
                           border_mode=self.border_mode,
                           dim_ordering=self.dim_ordering,
                           volume_shape=input_shape,
                           filter_shape=self.W_shape)
 
-        conv_out1 = K.sqrt(K.square(conv_out[:, :self.nb_filter, :, :, :]) + K.square(conv_out[:, self.nb_filter:2*self.nb_filter, :, :, :]) + K.eps())
+        conv_out1 = K.sqrt(K.square(conv_out[:, :self.nb_filter, :, :, :]) + K.square(conv_out[:, self.nb_filter:2*self.nb_filter, :, :, :]) + K.epsilon())
 
         conv_out2 = K.concatenate([conv_out1, conv_out[:, 2*self.nb_filter:, :, :, :]], axis=1)
 
         if self.bias:
             if self.dim_ordering == 'th':
-                conv_out2 += K.reshape(self.b, (1, self.nb_filter, 1, 1, 1))
+                conv_out2 += K.reshape(self.b, (1, self.nb_filter+1, 1, 1, 1))
             elif self.dim_ordering == 'tf':
-                conv_out2 += K.reshape(self.b, (1, 1, 1, 1, self.nb_filter))
+                conv_out2 += K.reshape(self.b, (1, 1, 1, 1, self.nb_filter+1))
             else:
                 raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-        output = self.activation(output)
-        return output
+        conv_out2 = self.activation(conv_out2)
+        return conv_out2
 
     def get_config(self):
         config = {'nb_filter': self.nb_filter,
-                  'kernel_dim1': self.kernel_dim1,
-                  'kernel_dim2': self.kernel_dim2,
-                  'kernel_dim3': self.kernel_dim3,
+                  'row': self.row,
+                  'col': self.col,
                   'dim_ordering': self.dim_ordering,
                   'init': self.init.__name__,
                   'activation': self.activation.__name__,

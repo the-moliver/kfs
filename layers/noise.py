@@ -108,21 +108,21 @@ def dropout(x, level, exclude_axis=None, seed=None):
     rng = RandomStreams2(seed=seed)
     retain_prob = 1. - level
     if exclude_axis == 0:
-        xshape = x[0].shape
+        xshape = list(x[0].shape)
         mask = T.zeros(xshape)
         mask = rng.shuffle_row_elements(T.set_subtensor(mask[:T.cast(retain_prob*xshape[0], 'int64')], 1))
-        mask = reshape(mask, (1, -1))
+        mask = reshape(mask, [1] + xshape)
         mask = T.addbroadcast(mask, 0)
     # if exclude_axis == 1:
     #     xshape = x[:, 0].shape
     #     mask = reshape(rng.binomial(xshape, p=retain_prob, dtype=x.dtype), (xshape[0], 1, -1))
     #     mask = T.addbroadcast(mask, 1)
     elif exclude_axis == [0, 1]:
-        xshape = x[0, 0].shape
+        xshape = list(x[0, 0].shape)
         # mask = reshape(rng.binomial(xshape, p=retain_prob, dtype=x.dtype), (1, 1, -1))
         mask = T.zeros(xshape)
         mask = rng.shuffle_row_elements(T.set_subtensor(mask[:T.cast(retain_prob*xshape[0], 'int64')], 1))
-        mask = reshape(mask, (1, 1, -1))
+        mask = reshape(mask, [1, 1] + xshape)
         mask = T.addbroadcast(mask, 0, 1)
     else:
         mask = rng.binomial(x.shape, p=retain_prob, dtype=x.dtype)

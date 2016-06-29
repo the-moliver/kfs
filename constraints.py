@@ -23,29 +23,28 @@ class UnitNormOrthogonal(Constraint):
             has shape (nb_row, nb_col, stack_size, nb_filter), set `axis` to `[0,1,2]`
             to constrain the weights of each filter tensor of size (nb_row, nb_col, stack_size).
     '''
-    def __init__(self, m, axis=0):
+    def __init__(self, m):
         self.m = m
-        self.axis = axis
 
     def __call__(self, p):
-        if self.axis == 0:
-            v = p[:self.m]
-            w = p[self.m:]
-        elif self.axis == 1:
-            v = p[:, :self.m]
-            w = p[:, self.m:]
-        v2 = w - v*K.sum(v*w, axis=self.axis, keepdims=True)/K.sum(v*v, axis=self.axis, keepdims=True)
-        if self.axis == 0:
-            p = T.set_subtensor(p[self.m:], v2)
-        elif self.axis == 1:
-            p = T.set_subtensor(p[:, self.m:], v2)
+        sumaxes = tuple(range(1, np.ndim(p)))
+        v = p[:self.m]
+        w = p[self.m:2*self.m]
+        v2 = w - v*K.sum(v*w, axis=sumaxes, keepdims=True)/K.sum(v*v, axis=sumaxes, keepdims=True)
 
-        return p / K.sqrt(K.sum(p**2, axis=self.axis, keepdims=True))
+        norms = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
+
+        v /= norms
+        v2 /= norms
+
+        p = T.set_subtensor(p[:self.m], v)
+        p = T.set_subtensor(p[self.m:2*self.m], v2)
+
+        return p
 
     def get_config(self):
         return {'name': self.__class__.__name__,
-                'm': self.m,
-                'axis': self.axis}
+                'm': self.m}
 
 
 
