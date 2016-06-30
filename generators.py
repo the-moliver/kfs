@@ -10,7 +10,7 @@ def make_batches_overlap(size, batch_size, overlap, filt_length):
             for i in range(0, nb_batch)]
 
 
-def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, color=False):
+def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, conv3d=False):
     '''A generator to make it easy to fit time-delay regression models,
     i.e. a model where the value of y depends on past values of x
 
@@ -33,7 +33,7 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
 
     '''
     index_array = np.arange(x.shape[0])
-    if color:
+    if conv3d:
         tlist = [1, 2, 0] + range(3, np.ndim(x) + 1)
     else:
         tlist = [1, 0] + range(2, np.ndim(x) + 1)
