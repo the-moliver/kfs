@@ -30,15 +30,19 @@ class UnitNormOrthogonal(Constraint):
         sumaxes = tuple(range(1, np.ndim(p)))
         v = p[:self.m]
         w = p[self.m:2*self.m]
+        x = p[2*self.m:]
         v2 = w - v*K.sum(v*w, axis=sumaxes, keepdims=True)/K.sum(v*v, axis=sumaxes, keepdims=True)
 
-        norms = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
+        norms_complex = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
+        norms_simple = K.sqrt(K.sum(x**2, axis=sumaxes, keepdims=True))
 
-        v /= norms
-        v2 /= norms
+        v /= norms_complex
+        v2 /= norms_complex
+        x /= norms_simple
 
         p = T.set_subtensor(p[:self.m], v)
         p = T.set_subtensor(p[self.m:2*self.m], v2)
+        p = T.set_subtensor(p[2*self.m:], x)
 
         return p
 
