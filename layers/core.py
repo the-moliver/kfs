@@ -660,16 +660,13 @@ class FilterDims(Layer):
             w_shape.append(self.nb_filters)
             broadcast.append(False)
 
-        print(input_shape)
-        print(w_shape)
-
-        
         for i in set(range(1, ndim)) - set(self.filter_axes):
             broadcast[i-1] = True
 
         self.W = self.init(w_shape,
-                           name='{}_W'.format(self.name), broadcastable=tuple(broadcast))
+                           name='{}_W'.format(self.name))
 
+        self.broadcast = broadcast
 
         if self.bias:
             bias_size = [1] * (ndim - 1)
@@ -678,7 +675,7 @@ class FilterDims(Layer):
 
             if self.nb_filters > 1:
                 bias_size.append(self.nb_filters)
-            print(bias_size)
+
             self.b = K.zeros(bias_size,
                              name='{}_b'.format(self.name))
             self.trainable_weights = [self.W, self.b]
@@ -709,13 +706,15 @@ class FilterDims(Layer):
             del self.initial_weights
 
     def call(self, x, mask=None):
+        bcast = list(np.where(self.broadcast)[0])
         if self.nb_filters > 1:
             ndim = len(self.input_spec[0].shape)
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]
-            print(permute_dims)
+            self.W = T.addbroadcast(self.W, *bcast)
             output = K.sum(x[..., None] * self.W, axis=self.sum_axes, keepdims=True)
+            self.W = T.unbroadcast(self.W, *bcast)
             if self.bias:
                 output += self.b
             output = K.squeeze(K.permute_dimensions(output, permute_dims), ndim)
@@ -733,8 +732,6 @@ class FilterDims(Layer):
         return self.activation(output)
 
     def get_output_shape_for(self, input_shape):
-        # assert input_shape and len(input_shape) == 5
-
         if self.nb_filters > 1:
             ndim = len(input_shape)
             output_shape = [input_shape[0]] + [1] * (ndim-1)
@@ -753,7 +750,6 @@ class FilterDims(Layer):
             output_shape = input_shape
             output_shape = [output_shape[i] for i in set(range(len(input_shape))) - set(self.sum_axes)]
 
-        print(output_shape)
         return tuple(output_shape)
 
     def get_config(self):

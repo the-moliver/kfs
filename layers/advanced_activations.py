@@ -89,10 +89,8 @@ class PowerPReLU(Layer):
         super(PowerPReLU, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        print(input_shape)
-        print(input_shape[self.axis])
         alpha_shape = input_shape[self.axis]
-        print(alpha_shape)
+
         self.alpha_pos = self.init((alpha_shape,),
                                 name='{}alpha_pos'.format(self.name))
         self.alpha_neg = self.init((alpha_shape,),
