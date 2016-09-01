@@ -81,11 +81,12 @@ class PowerPReLU(Layer):
     # References
         - [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](http://arxiv.org/pdf/1502.01852v1.pdf)
     '''
-    def __init__(self, init='one', weights=None, axis=-1, **kwargs):
+    def __init__(self, init='one', weights=None, axis=-1, fit=True, **kwargs):
         self.supports_masking = True
         self.init = initializations.get(init)
         self.initial_weights = weights
         self.axis = axis
+        self.fit = fit
         super(PowerPReLU, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -95,15 +96,12 @@ class PowerPReLU(Layer):
                                 name='{}alpha_pos'.format(self.name))
         self.alpha_neg = self.init((alpha_shape,),
                                 name='{}alpha_neg'.format(self.name))
-        # self.rho_pos = self.init((alpha_shape,),
-        #                         name='{}rho_pos'.format(self.name))
-        # self.rho_neg = self.init((alpha_shape,),
-        #                         name='{}rho_neg'.format(self.name))
         self.rho_pos = K.variable(2 * np.ones(alpha_shape),
                                  name='{}rho_pos'.format(self.name))
         self.rho_neg = K.variable(2 * np.ones(alpha_shape),
                                  name='{}rho_neg'.format(self.name))
-        self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.rho_pos, self.rho_neg]
+        if self.fit:
+            self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.rho_pos, self.rho_neg]
 
         self.input_spec = [InputSpec(dtype=K.floatx(),
                                      shape=input_shape)]
