@@ -105,6 +105,30 @@ class LaplacianWeightRegularizer(Regularizer):
                 "l2": self.l2}
 
 
+class LaplacianRegularizer(Regularizer):
+    def __init__(self, l1=0., l2=0., axis=0):
+        self.l1 = l1
+        self.l2 = l2
+        self.axis = list(axis)
+        self.uses_learning_phase = True
+
+    def set_param(self, p):
+        self.p = p
+
+    def __call__(self, loss):
+        dimorder = self.axes + list(set(range(K.ndim(self.p))) - set(self.axes))
+        p = K.permute_dimensions(self.p, dimorder)
+        lp = laplacian1d(p)
+        regularized_loss = loss + K.sum(abs(lp)) * self.l1
+        regularized_loss += K.sum(lp ** 2) * self.l2
+        return K.in_train_phase(regularized_loss, loss)
+
+    def get_config(self):
+        return {"name": self.__class__.__name__,
+                "l1": self.l1,
+                "l2": self.l2}
+
+
 class TVWeightRegularizer(Regularizer):
     def __init__(self, TV=0., TV2=0., rows=1, columns=1, colors=1):
         self.TV = TV
@@ -183,35 +207,25 @@ class TVWeightRegularizer2d(Regularizer):
                 "TV2": self.TV2}
 
 
-class TVWeightRegularizer4d(Regularizer):
-    def __init__(self, TV=0., TV2=0.):
+class TVRegularizer(Regularizer):
+    def __init__(self, TV=0., TV2=0., axes=[0, 1]):
         self.TV = TV
         self.TV2 = TV2
+        self.axes = list(axes)
         self.uses_learning_phase = True
 
     def set_param(self, p):
         self.p = p
 
     def __call__(self, loss):
+        dimorder = self.axes + list(set(range(K.ndim(self.p))) - set(self.axes))
+        p = K.permute_dimensions(self.p, dimorder)
 
-        p = K.permute_dimensions(self.p, (1, 2, 3, 4, 0))
-
-        pen1 = K.sum(K.sqrt(K.square(diffr(p[0])) + K.square(diffc(p[0])) + K.epsilon()), axis=(0, 1))
-        pen2 = K.sum(K.sqrt(K.square(diffrr(p[0])) + K.square(diffcc(p[0])) + 2*K.square(diffrc(p[0])) + K.epsilon()), axis=(0, 1))
+        pen1 = K.sum(K.sqrt(K.square(diffr(p)) + K.square(diffc(p)) + K.epsilon()), axis=(0, 1))
+        pen2 = K.sum(K.sqrt(K.square(diffrr(p)) + K.square(diffcc(p)) + 2*K.square(diffrc(p)) + K.epsilon()), axis=(0, 1))
 
         regularized_loss = loss + pen1.sum() * self.TV
         regularized_loss += pen2.sum() * self.TV2
-
-        if p.shape[0] is 3:
-            pen3 = K.sum(K.sqrt(K.square(diffr(p[1])) + K.square(diffc(p[1])) + K.epsilon()), axis=(0, 1))
-            pen4 = K.sum(K.sqrt(K.square(diffrr(p[1])) + K.square(diffcc(p[1])) + 2*K.square(diffrc(p[1])) + K.epsilon()), axis=(0, 1))
-            pen5 = K.sum(K.sqrt(K.square(diffr(p[2])) + K.square(diffc(p[2])) + K.epsilon()), axis=(0, 1))
-            pen6 = K.sum(K.sqrt(K.square(diffrr(p[2])) + K.square(diffcc(p[2])) + 2*K.square(diffrc(p[2])) + K.epsilon()), axis=(0, 1))
-
-            regularized_loss += pen3.sum() * self.TV
-            regularized_loss += pen4.sum() * self.TV2
-            regularized_loss += pen5.sum() * self.TV
-            regularized_loss += pen6.sum() * self.TV2
 
         return K.in_train_phase(regularized_loss, loss)
 
@@ -221,13 +235,12 @@ class TVWeightRegularizer4d(Regularizer):
                 "TV2": self.TV2}
 
 
-
 def laplacian_l2(l=0.01):
     return LaplacianWeightRegularizer(l2=l)
 
+
 def laplacian_l1(l=0.001):
     return LaplacianWeightRegularizer(l1=l)
-
 
 
 def laplacian1d(X):
@@ -236,56 +249,58 @@ def laplacian1d(X):
 
 def diffc(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = T.set_subtensor(Xout[:,1:-1], X[:,2:] - X[:,:-2])
-    Xout = T.set_subtensor(Xout[:,0], X[:,1] - X[:,0])
-    Xout = T.set_subtensor(Xout[:,-1], X[:,-1] - X[:,-2])
+    Xout = T.set_subtensor(Xout[:, 1:-1], X[:, 2:] - X[:, :-2])
+    Xout = T.set_subtensor(Xout[:, 0], X[:, 1] - X[:, 0])
+    Xout = T.set_subtensor(Xout[:, -1], X[:, -1] - X[:, -2])
     return Xout/2
+
 
 def diffr(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = T.set_subtensor(Xout[1:-1,:], X[2:,:] - X[:-2,:])
-    Xout = T.set_subtensor(Xout[0,:], X[1,:] - X[0,:])
-    Xout = T.set_subtensor(Xout[-1,:], X[-1,:] - X[-2,:])
+    Xout = T.set_subtensor(Xout[1:-1, :], X[2:, :] - X[:-2, :])
+    Xout = T.set_subtensor(Xout[0, :], X[1, :] - X[0, :])
+    Xout = T.set_subtensor(Xout[-1, :], X[-1, :] - X[-2, :])
     return Xout/2
 
 
 def diffcc(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = T.set_subtensor(Xout[:,1:-1], X[:,2:] + X[:,:-2])
-    Xout = T.set_subtensor(Xout[:,0], X[:,1] + X[:,0])
-    Xout = T.set_subtensor(Xout[:,-1], X[:,-1] + X[:,-2])
+    Xout = T.set_subtensor(Xout[:, 1:-1], X[:, 2:] + X[:, :-2])
+    Xout = T.set_subtensor(Xout[:, 0], X[:, 1] + X[:, 0])
+    Xout = T.set_subtensor(Xout[:, -1], X[:, -1] + X[:, -2])
     return Xout - 2*X
+
 
 def diffrr(X):
     Xout = K.zeros(X.shape.eval())
-    Xout = T.set_subtensor(Xout[1:-1,:], X[2:,:] + X[:-2,:])
-    Xout = T.set_subtensor(Xout[0,:], X[1,:] + X[0,:])
-    Xout = T.set_subtensor(Xout[-1,:], X[-1,:] + X[-2,:])
+    Xout = T.set_subtensor(Xout[1:-1, :], X[2:, :] + X[:-2, :])
+    Xout = T.set_subtensor(Xout[0, :], X[1, :] + X[0, :])
+    Xout = T.set_subtensor(Xout[-1, :], X[-1, :] + X[-2, :])
     return Xout - 2*X
+
 
 def diffrc(X):
     Xout1 = K.zeros(X.shape.eval())
-    Xout1 = T.set_subtensor(Xout1[1:-1,1:-1], X[2:,2:]+X[:-2,:-2])
-    Xout1 = T.set_subtensor(Xout1[0,0], X[1,1]+X[0,0])
-    Xout1 = T.set_subtensor(Xout1[0,1:-1], X[1,2:]+X[0,:-2])
-    Xout1 = T.set_subtensor(Xout1[0,-1], X[1,-1]+X[0,-2])
-    Xout1 = T.set_subtensor(Xout1[1:-1,-1], X[2:,-1]+X[:-2,-2])
-    Xout1 = T.set_subtensor(Xout1[-1,-1], X[-1,-1]+X[-2,-2])
-    Xout1 = T.set_subtensor(Xout1[-1,1:-1], X[-1,2:]+X[-2,:-2])
-    Xout1 = T.set_subtensor(Xout1[-1,0], X[-1,1]+X[-2,0])
-    Xout1 = T.set_subtensor(Xout1[1:-1,0], X[2:,1]+X[:-2,0])
-
+    Xout1 = T.set_subtensor(Xout1[1:-1, 1:-1], X[2:, 2:]+X[:-2, :-2])
+    Xout1 = T.set_subtensor(Xout1[0, 0], X[1, 1]+X[0, 0])
+    Xout1 = T.set_subtensor(Xout1[0, 1:-1], X[1, 2:]+X[0, :-2])
+    Xout1 = T.set_subtensor(Xout1[0, -1], X[1, -1]+X[0, -2])
+    Xout1 = T.set_subtensor(Xout1[1:-1, -1], X[2:, -1]+X[:-2, -2])
+    Xout1 = T.set_subtensor(Xout1[-1, -1], X[-1, -1]+X[-2, -2])
+    Xout1 = T.set_subtensor(Xout1[-1, 1:-1], X[-1, 2:]+X[-2, :-2])
+    Xout1 = T.set_subtensor(Xout1[-1, 0], X[-1, 1]+X[-2, 0])
+    Xout1 = T.set_subtensor(Xout1[1:-1, 0], X[2:, 1]+X[:-2, 0])
 
     Xout2 = K.zeros(X.shape.eval())
-    Xout2 = T.set_subtensor(Xout2[1:-1,1:-1], X[:-2,2:]+X[2:,:-2])
-    Xout2 = T.set_subtensor(Xout2[0,0], X[0,1]+X[1,0])
-    Xout2 = T.set_subtensor(Xout2[0,1:-1], X[0,2:]+X[1,:-2])
-    Xout2 = T.set_subtensor(Xout2[0,-1], X[0,-1]+X[1,-2])
-    Xout2 = T.set_subtensor(Xout2[1:-1,-1], X[:-2,-1]+X[2:,-2])
-    Xout2 = T.set_subtensor(Xout2[-1,-1], X[-2,-1]+X[-1,-2])
-    Xout2 = T.set_subtensor(Xout2[-1,1:-1], X[-2,2:]+X[-1,:-2])
-    Xout2 = T.set_subtensor(Xout2[-1,0], X[-2,1]+X[-1,0])
-    Xout2 = T.set_subtensor(Xout2[1:-1,0], X[:-2,1]+X[2:,0])
+    Xout2 = T.set_subtensor(Xout2[1:-1, 1:-1], X[:-2, 2:]+X[2:, :-2])
+    Xout2 = T.set_subtensor(Xout2[0, 0], X[0, 1]+X[1, 0])
+    Xout2 = T.set_subtensor(Xout2[0, 1:-1], X[0, 2:]+X[1, :-2])
+    Xout2 = T.set_subtensor(Xout2[0, -1], X[0, -1]+X[1, -2])
+    Xout2 = T.set_subtensor(Xout2[1:-1, -1], X[:-2, -1]+X[2:, -2])
+    Xout2 = T.set_subtensor(Xout2[-1, -1], X[-2, -1]+X[-1, -2])
+    Xout2 = T.set_subtensor(Xout2[-1, 1:-1], X[-2, 2:]+X[-1, :-2])
+    Xout2 = T.set_subtensor(Xout2[-1, 0], X[-2, 1]+X[-1, 0])
+    Xout2 = T.set_subtensor(Xout2[1:-1, 0], X[:-2, 1]+X[2:, 0])
 
     return (Xout1 - Xout2)/4
 

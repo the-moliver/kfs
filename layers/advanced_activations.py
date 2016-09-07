@@ -81,11 +81,12 @@ class PowerPReLU(Layer):
     # References
         - [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](http://arxiv.org/pdf/1502.01852v1.pdf)
     '''
-    def __init__(self, init='one', weights=None, axis=-1, fit=True, **kwargs):
+    def __init__(self, init='one', power_init=1, weights=None, axis=-1, fit=True, **kwargs):
         self.supports_masking = True
         self.init = initializations.get(init)
         self.initial_weights = weights
         self.axis = axis
+        self.power_init = power_init
         self.fit = fit
         super(PowerPReLU, self).__init__(**kwargs)
 
@@ -96,9 +97,9 @@ class PowerPReLU(Layer):
                                 name='{}alpha_pos'.format(self.name))
         self.alpha_neg = self.init((alpha_shape,),
                                 name='{}alpha_neg'.format(self.name))
-        self.rho_pos = K.variable(2 * np.ones(alpha_shape),
+        self.rho_pos = K.variable(self.power_init * np.ones(alpha_shape),
                                  name='{}rho_pos'.format(self.name))
-        self.rho_neg = K.variable(2 * np.ones(alpha_shape),
+        self.rho_neg = K.variable(self.power_init * np.ones(alpha_shape),
                                  name='{}rho_neg'.format(self.name))
         if self.fit:
             self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.rho_pos, self.rho_neg]
@@ -127,6 +128,71 @@ class PowerPReLU(Layer):
     def get_config(self):
         config = {'init': self.init.__name__}
         base_config = super(PowerPReLU, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class PowerReLU(Layer):
+    '''Parametric Rectified Linear Unit:
+    `f(x) = alphas * x for x < 0`,
+    `f(x) = x for x >= 0`,
+    where `alphas` is a learned array with the same shape as x.
+
+    # Input shape
+        Arbitrary. Use the keyword argument `input_shape`
+        (tuple of integers, does not include the samples axis)
+        when using this layer as the first layer in a model.
+
+    # Output shape
+        Same shape as the input.
+
+    # Arguments
+        init: initialization function for the weights.
+        weights: initial weights, as a list of a single Numpy array.
+
+    # References
+        - [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](http://arxiv.org/pdf/1502.01852v1.pdf)
+    '''
+    def __init__(self, init='one', power_init=1, weights=None, axis=-1, fit=True, **kwargs):
+        self.supports_masking = True
+        self.init = initializations.get(init)
+        self.initial_weights = weights
+        self.axis = axis
+        self.power_init = power_init
+        self.fit = fit
+        super(PowerReLU, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        alpha_shape = input_shape[self.axis]
+
+        self.alpha = self.init((alpha_shape,),
+                                name='{}alpha_pos'.format(self.name))
+        self.rho = K.variable(self.power_init * np.ones(alpha_shape),
+                                 name='{}rho_pos'.format(self.name))
+
+        if self.fit:
+            self.trainable_weights = [self.alpha, self.rho]
+
+        self.input_spec = [InputSpec(dtype=K.floatx(),
+                                     shape=input_shape)]
+
+        if self.initial_weights is not None:
+            self.set_weights(self.initial_weights)
+            del self.initial_weights
+
+    def call(self, x, mask=None):
+        input_shape = self.input_spec[0].shape
+        reduction_axes = list(range(len(input_shape)))
+        del reduction_axes[self.axis]
+        broadcast_shape = [1] * len(input_shape)
+        broadcast_shape[self.axis] = input_shape[self.axis]
+        alpha = K.reshape(self.alpha, broadcast_shape)
+        rho = K.reshape(self.rho, broadcast_shape)
+
+        return alpha * K.pow(K.relu(x) + K.epsilon(), rho)
+
+    def get_config(self):
+        config = {'init': self.init.__name__}
+        base_config = super(PowerReLU, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
