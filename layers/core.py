@@ -706,9 +706,30 @@ class FilterDims(Layer):
             del self.initial_weights
 
     def call(self, x, mask=None):
-        bcast = list(np.where(self.broadcast)[0])
-        if self.nb_filters > 1:
-            ndim = len(self.input_spec[0].shape)
+        ndim = len(self.input_spec[0].shape)
+
+        if self.filter_axes == self.sum_axes:
+            ax1 = [a-1 for a in self.sum_axes]
+            ax1 = ax1 + list(set(range(ndim)) - set(ax1))
+            ax2 = list(set(range(ndim)) - set(self.sum_axes))
+            permute_dims = range(len(ax2))
+            permute_dims.insert(self.sum_axes[0], len(ax2))
+            outdims = [-1] + [self.input_spec[0].shape[a] for a in ax2[1:]] + [self.nb_filters]
+            ax2 = ax2 + self.sum_axes
+            W = K.permute_dimensions(self.W, ax1)
+            W = K.reshape(W, (-1, self.nb_filters))
+            x = K.permute_dimensions(x, ax2)
+            x = K.reshape(x, (-1, W.shape[0]))
+            output = K.reshape(K.dot(x, W), outdims)
+            if self.bias:
+                b = K.squeeze(self.b, self.sum_axes[0])
+                if len(self.sum_axes) > 1:
+                    b = K.squeeze(b, self.sum_axes[1] - 1)
+                output += b
+            output = K.permute_dimensions(output, permute_dims)
+
+        elif self.nb_filters > 1:
+            bcast = list(np.where(self.broadcast)[0])
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]

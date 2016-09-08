@@ -109,14 +109,15 @@ class LaplacianRegularizer(Regularizer):
     def __init__(self, l1=0., l2=0., axis=0):
         self.l1 = l1
         self.l2 = l2
-        self.axis = list(axis)
+        self.axis = []
+        self.axis.append(axis)
         self.uses_learning_phase = True
 
     def set_param(self, p):
         self.p = p
 
     def __call__(self, loss):
-        dimorder = self.axes + list(set(range(K.ndim(self.p))) - set(self.axes))
+        dimorder = self.axis + list(set(range(K.ndim(self.p))) - set(self.axis))
         p = K.permute_dimensions(self.p, dimorder)
         lp = laplacian1d(p)
         regularized_loss = loss + K.sum(abs(lp)) * self.l1
