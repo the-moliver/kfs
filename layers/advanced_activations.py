@@ -97,12 +97,16 @@ class PowerPReLU(Layer):
                                 name='{}alpha_pos'.format(self.name))
         self.alpha_neg = self.init((alpha_shape,),
                                 name='{}alpha_neg'.format(self.name))
+        self.beta_pos = K.variable(np.zeros(alpha_shape),
+                                 name='{}beta_pos'.format(self.name))
+        self.beta_neg = K.variable(np.zeros(alpha_shape),
+                                 name='{}beta_neg'.format(self.name))
         self.rho_pos = K.variable(self.power_init * np.ones(alpha_shape),
                                  name='{}rho_pos'.format(self.name))
         self.rho_neg = K.variable(self.power_init * np.ones(alpha_shape),
                                  name='{}rho_neg'.format(self.name))
         if self.fit:
-            self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.rho_pos, self.rho_neg]
+            self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.beta_pos, self.beta_neg, self.rho_pos, self.rho_neg]
 
         self.input_spec = [InputSpec(dtype=K.floatx(),
                                      shape=input_shape)]
@@ -119,10 +123,12 @@ class PowerPReLU(Layer):
         broadcast_shape[self.axis] = input_shape[self.axis]
         alpha_pos = K.reshape(self.alpha_pos, broadcast_shape)
         alpha_neg = K.reshape(self.alpha_neg, broadcast_shape)
+        beta_pos = K.reshape(self.beta_pos, broadcast_shape)
+        beta_neg = K.reshape(self.beta_neg, broadcast_shape)
         rho_pos = K.reshape(self.rho_pos, broadcast_shape)
         rho_neg = K.reshape(self.rho_neg, broadcast_shape)
-        pos = alpha_pos * K.pow(K.relu(x) + K.epsilon(), rho_pos)
-        neg = alpha_neg * K.pow(K.relu(-x) + K.epsilon(), rho_neg)
+        pos = alpha_pos * K.pow(K.relu(x + beta_pos) + K.epsilon(), rho_pos)
+        neg = alpha_neg * K.pow(K.relu(-x + beta_neg) + K.epsilon(), rho_neg)
         return pos + neg
 
     def get_config(self):

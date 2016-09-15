@@ -1200,6 +1200,190 @@ class Convolution2DColorEnergy_DelayBasis9(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
+class Convolution2DColorEnergy_DelayBasis10(Layer):
+    def __init__(self, nb_filter_simple, nb_filter_complex, nb_row, nb_col, delays, delay_basis, shift_basis, color_chans=3,
+                 init='glorot_uniform', activation='relu', weights=None,
+                 border_mode='valid', subsample=(1, 1), dim_ordering=K.image_dim_ordering(),
+                 W_regularizer=None, Wt_regularizer=None, b_regularizer=None, activity_regularizer=None,
+                 W_constraint=None, Wt_constraint=None, b_constraint=None,
+                 bias=True, **kwargs):
+
+        if border_mode not in {'valid', 'same'}:
+            raise Exception('Invalid border mode for Convolution2D:', border_mode)
+        self.nb_filter_simple = nb_filter_simple
+        self.nb_filter_complex = nb_filter_complex
+        self.nb_row = nb_row
+        self.nb_col = nb_col
+        self.delays = delays
+        self.delay_basis = delay_basis
+        self.shift_basis = shift_basis
+        self.init = initializations.get(init, dim_ordering=dim_ordering)
+        self.activation = activations.get(activation)
+        assert border_mode in {'valid', 'same'}, 'border_mode must be in {valid, same}'
+        self.border_mode = border_mode
+        self.subsample = tuple(subsample)
+        assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
+        self.dim_ordering = dim_ordering
+        self.color_chans = color_chans
+
+        self.W_regularizer = regularizers.get(W_regularizer)
+        self.Wt_regularizer = regularizers.get(Wt_regularizer)
+        self.b_regularizer = regularizers.get(b_regularizer)
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+
+        self.W_constraint = constraints.UnitNormOrthogonal(self.nb_filter_complex+self.nb_filter_simple)
+        self.Wt_constraint = constraints.get(Wt_constraint)
+        self.b_constraint = constraints.get(b_constraint)
+
+        self.bias = bias
+        self.input_spec = [InputSpec(ndim=5)]
+        self.initial_weights = weights
+        super(Convolution2DColorEnergy_DelayBasis10, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert len(input_shape) == 5
+        self.input_spec = [InputSpec(shape=input_shape)]
+
+        if self.dim_ordering == 'th':
+            # stack_size = input_shape[2]
+            self.W_shape = (2*self.nb_filter_complex + 2*self.nb_filter_simple, self.color_chans, self.nb_row, self.nb_col)
+        elif self.dim_ordering == 'tf':
+            # stack_size = input_shape[4]
+            self.W_shape = (self.nb_row, self.nb_col, self.color_chans, 2*self.nb_filter_complex + 2*self.nb_filter_simple)
+        else:
+            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
+        self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
+        self.Wt = self.init((self.delays, self.delay_basis), name='{}_Wt'.format(self.name))
+        step = 2./(self.shift_basis-1.)
+        steps = np.arange(0, 2+step, step)[:self.shift_basis] - 1.
+        self.delays_pi = K.variable(np.pi*np.arange(0, 1+1./(self.delays-1), 1./(self.delays-1)), name='{}_delays_pi'.format(self.name))
+        self.Ws = K.variable(steps, name='{}_Ws'.format(self.name))
+
+        if self.bias:
+            self.b = K.zeros((self.nb_filter_complex + self.nb_filter_simple,), name='{}_b'.format(self.name))
+            self.trainable_weights = [self.W, self.Wt, self.Ws, self.b]
+        else:
+            self.trainable_weights = [self.W, self.Wt, self.Ws]
+        self.regularizers = []
+
+        if self.W_regularizer:
+            self.W_regularizer.set_param(self.W)
+            self.regularizers.append(self.W_regularizer)
+
+        if self.Wt_regularizer:
+            self.Wt_regularizer.set_param(self.Wt)
+            self.regularizers.append(self.Wt_regularizer)
+
+        if self.bias and self.b_regularizer:
+            self.b_regularizer.set_param(self.b)
+            self.regularizers.append(self.b_regularizer)
+
+        if self.activity_regularizer:
+            self.activity_regularizer.set_layer(self)
+            self.regularizers.append(self.activity_regularizer)
+
+        self.constraints = {}
+        if self.W_constraint:
+            self.constraints[self.W] = self.W_constraint
+        if self.Wt_constraint:
+            self.constraints[self.Wt] = self.Wt_constraint
+        if self.bias and self.b_constraint:
+            self.constraints[self.b] = self.b_constraint
+
+        if self.initial_weights is not None:
+            self.set_weights(self.initial_weights)
+            del self.initial_weights
+
+    def get_output_shape_for(self, input_shape):
+        if self.dim_ordering == 'th':
+            # conv_dim1 = input_shape[1]
+            conv_dim2 = input_shape[3]
+            conv_dim3 = input_shape[4]
+        elif self.dim_ordering == 'tf':
+            # conv_dim1 = input_shape[1]
+            conv_dim2 = input_shape[2]
+            conv_dim3 = input_shape[3]
+        else:
+            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
+
+        # conv_dim1 = conv_output_length(conv_dim1, 1,
+        #                                self.border_mode, self.subsample[0])
+        conv_dim2 = conv_output_length(conv_dim2, self.nb_row,
+                                       self.border_mode, self.subsample[0])
+        conv_dim3 = conv_output_length(conv_dim3, self.nb_col,
+                                       self.border_mode, self.subsample[1])
+
+        if self.dim_ordering == 'th':
+            return (input_shape[0], self.delay_basis*self.shift_basis, (self.nb_filter_complex + self.nb_filter_simple), conv_dim2, conv_dim3)
+        elif self.dim_ordering == 'tf':
+            return (input_shape[0], self.t_feats, conv_dim2, conv_dim3, (self.nb_filter_complex + self.nb_filter_simple)*self.delay_basis)
+        else:
+            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
+
+    def call(self, x, mask=None):
+        input_shape = self.input_spec[0].shape
+        output_shape = [-1] + list(self.get_output_shape_for(input_shape)[1:])
+        xshape = x.shape
+        x = K.reshape(x, (-1, xshape[2], xshape[3], xshape[4]))
+
+        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.Ws[None, :, None])*self.Wt[:, None, :], (-1, self.delay_basis*self.shift_basis))
+        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None]*self.Ws[None, :, None])*self.Wt[:, None, :], (-1, self.delay_basis*self.shift_basis))
+
+        w0t = K.concatenate((cos_step, -sin_step), axis=0)
+        w1t = K.concatenate((sin_step, cos_step), axis=0)
+
+        conv_out1 = K.conv2d(x, self.W, strides=self.subsample,
+                          border_mode=self.border_mode,
+                          dim_ordering=self.dim_ordering,
+                          filter_shape=self.W_shape)
+
+        # samps x delays x stack x X x Y
+        conv_out1 = K.reshape(conv_out1, (xshape[0], xshape[1], conv_out1.shape[1], conv_out1.shape[2], conv_out1.shape[3])).dimshuffle(0, 2, 3, 4, 1)
+        # samps x stack x X x Y x delays
+
+        conv_out12 = K.concatenate([conv_out1[:, :self.nb_filter_complex, :, :, :], conv_out1[:, self.nb_filter_complex+self.nb_filter_simple:2*self.nb_filter_complex+self.nb_filter_simple, :, :, :]], axis=4)
+        conv_out34 = K.concatenate([conv_out1[:, self.nb_filter_complex:self.nb_filter_complex + self.nb_filter_simple, :, :, :], conv_out1[:, 2*self.nb_filter_complex + self.nb_filter_simple:, :, :, :]], axis=4)
+
+        conv_out = K.sqrt(K.square(K.dot(conv_out12, w0t)) + K.square(K.dot(conv_out12, w1t)) + K.epsilon())
+        conv_outlin = K.dot(conv_out34, w0t)
+        # samps x stack x X x Y x delay_basis*shift_basis
+
+
+        output = K.concatenate([conv_out, conv_outlin], axis=1).dimshuffle(0, 4, 1, 2, 3)
+        # samps x delay_basis*shift_basis x stack x X x Y
+
+        if self.bias:
+            if self.dim_ordering == 'th':
+                output += K.reshape(self.b, (1, 1, self.nb_filter_complex + self.nb_filter_simple, 1, 1))
+            elif self.dim_ordering == 'tf':
+                output += K.reshape(self.b, (1, 1, 1, 1, self.nb_filter_complex + self.nb_filter_simple))
+            else:
+                raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
+        output = K.reshape(self.activation(output), output_shape)
+        return output
+
+    def get_config(self):
+        config = {'nb_filter_simple': self.nb_filter_simple,
+                  'nb_filter_complex': self.nb_filter_complex,
+                  'nb_row': self.nb_row,
+                  'nb_col': self.nb_col,
+                  'init': self.init.__name__,
+                  'activation': self.activation.__name__,
+                  'border_mode': self.border_mode,
+                  'subsample': self.subsample,
+                  'dim_ordering': self.dim_ordering,
+                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
+                  'Wt_regularizer': self.Wt_regularizer.get_config() if self.Wt_regularizer else None,
+                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
+                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
+                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+                  'Wt_constraint': self.Wt_constraint.get_config() if self.Wt_constraint else None,
+                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
+                  'bias': self.bias}
+        base_config = super(Convolution2DColorEnergy_DelayBasis10, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
 
 class Convolution2DEnergy_Delay3(Layer):
     def __init__(self, nb_filter, nb_row, nb_col,
