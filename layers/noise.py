@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 from keras.engine import Layer
 from keras import backend as K
+from keras.layers.core import Dropout
 
 
 class CoupledGaussianDropout(Layer):
@@ -41,33 +42,37 @@ class CoupledGaussianDropoutRect(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
-class Dropout(Layer):
-    '''Applies Dropout to the input. Dropout consists in randomly setting
-    a fraction `p` of input units to 0 at each update during training time,
-    which helps prevent overfitting.
-
+class ShapeDropout(Dropout):
+    '''This version performs the same function as Dropout, however it drops
+    entire 2D feature maps instead of individual elements. If adjacent pixels
+    within feature maps are strongly correlated (as is normally the case in
+    early convolution layers) then regular dropout will not regularize the
+    activations and will otherwise just result in an effective learning rate
+    decrease. In this case, SpatialDropout2D will help promote independence
+    between feature maps and should be used instead.
     # Arguments
         p: float between 0 and 1. Fraction of the input units to drop.
-
+        dim_ordering: 'th' or 'tf'. In 'th' mode, the channels dimension
+            (the depth) is at index 1, in 'tf' mode is it at index 3.
+            It defaults to the `image_dim_ordering` value found in your
+            Keras config file at `~/.keras/keras.json`.
+            If you never set it, then it will be "tf".
+    # Input shape
+        4D tensor with shape:
+        `(samples, channels, rows, cols)` if dim_ordering='th'
+        or 4D tensor with shape:
+        `(samples, rows, cols, channels)` if dim_ordering='tf'.
+    # Output shape
+        Same as input
     # References
-        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting](http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
+        - [Efficient Object Localization Using Convolutional Networks](https://arxiv.org/pdf/1411.4280.pdf)
     '''
-    def __init__(self, p, exclude_axis=None, **kwargs):
-        self.supports_masking = True
-        self.uses_learning_phase = True
-        self.p = p
-        self.exclude_axis = exclude_axis
-        super(Dropout, self).__init__(**kwargs)
+    def __init__(self, p, noise_shape=None, **kwargs):
+        self.noise_shape = noise_shape
+        super(ShapeDropout, self).__init__(p, **kwargs)
 
-    def call(self, x, mask=None):
-        if 0. < self.p < 1.:
-            x = K.in_train_phase(dropout(x, level=self.p, exclude_axis=self.exclude_axis), x)
-        return x
-
-    def get_config(self):
-        config = {'p': self.p, 'exclude_axis': self.exclude_axis}
-        base_config = super(Dropout, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+    def _get_noise_shape(self, x):
+        return self.noise_shape
 
 
 
@@ -87,45 +92,3 @@ class Gain(Layer):
         config = {'gain': self.gain}
         base_config = super(Gain, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-
-import theano
-import numpy as np
-from theano import tensor as T
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-from theano.tensor.shared_randomstreams import RandomStreams as RandomStreams2
-
-
-def reshape(x, shape):
-    return T.reshape(x, shape)
-
-
-def dropout(x, level, exclude_axis=None, seed=None):
-    if level < 0. or level >= 1:
-        raise Exception('Dropout level must be in interval [0, 1].')
-    if seed is None:
-        seed = np.random.randint(10e6)
-    rng = RandomStreams2(seed=seed)
-    retain_prob = 1. - level
-    if exclude_axis == 0:
-        xshape = list(x[0].shape)
-        mask = T.zeros(xshape)
-        mask = rng.shuffle_row_elements(T.set_subtensor(mask[:T.cast(retain_prob*xshape[0], 'int64')], 1))
-        mask = reshape(mask, [1] + xshape)
-        mask = T.addbroadcast(mask, 0)
-    # if exclude_axis == 1:
-    #     xshape = x[:, 0].shape
-    #     mask = reshape(rng.binomial(xshape, p=retain_prob, dtype=x.dtype), (xshape[0], 1, -1))
-    #     mask = T.addbroadcast(mask, 1)
-    elif exclude_axis == [0, 1]:
-        xshape = list(x[0, 0].shape)
-        # mask = reshape(rng.binomial(xshape, p=retain_prob, dtype=x.dtype), (1, 1, -1))
-        mask = T.zeros(xshape)
-        mask = rng.shuffle_row_elements(T.set_subtensor(mask[:T.cast(retain_prob*xshape[0], 'int64')], 1))
-        mask = reshape(mask, [1, 1] + xshape)
-        mask = T.addbroadcast(mask, 0, 1)
-    else:
-        mask = rng.binomial(x.shape, p=retain_prob, dtype=x.dtype)
-    x *= mask
-    x /= retain_prob
-    return x

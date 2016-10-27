@@ -113,100 +113,6 @@ class TemporalFilter(Layer):
 
 
 
-class TemporalFilter2D(Layer):
-    def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None, input_dim=None, bias=False, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.output_dim = output_dim
-        self.input_dim = input_dim
-        self.bias = bias
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-
-        if self.bias:
-            self.b_regularizer = regularizers.get(b_regularizer)
-            self.b_constraint = constraints.get(b_constraint)
-
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=5)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(TemporalFilter2D, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 5
-        input_dim = input_shape[1]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim, input_shape[2], input_shape[3], input_shape[4]))]
-
-        self.W = self.init((input_dim, self.output_dim),
-                           name='{}_W'.format(self.name))
-        if self.bias:
-            self.b = K.zeros((self.output_dim,),
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
-        else:
-            self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    def call(self, x, mask=None):
-        # Squash samples and timesteps into a single axis
-        x = K.permute_dimensions(x, [0, 2, 3, 4, 1])
-        x = K.reshape(x, (-1, self.input_spec[0].shape[1]))  # (samples * input_dim, timesteps)
-        output = K.dot(x, self.W)  # (samples * input_dim, output_dim)
-        if self.bias:
-            output += self.b
-        output = K.reshape(output, (-1, self.input_spec[0].shape[2], self.input_spec[0].shape[3], self.input_spec[0].shape[4], self.output_dim))  # (samples, input_dim, output_dim)
-        output = K.permute_dimensions(output, [0, 4, 1, 2, 3])  # (samples, output_dim, input_dim)
-        return self.activation(output)
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 5
-        return (input_shape[0], self.output_dim, input_shape[2], input_shape[3], input_shape[4])
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'input_dim': self.input_dim}
-        base_config = super(TemporalFilter2D, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-
 class SpatialFilter(Layer):
     def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None, bias=False,
@@ -309,315 +215,78 @@ class SpatialFilter(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
-class FilterDimSum4(Layer):
-    '''Just your regular fully connected NN layer.
-
-    # Example
-
-    ```python
-        # as first layer in a sequential model:
-        model = Sequential()
-        model.add(Dense(32, input_dim=16))
-        # now the model will take as input arrays of shape (*, 16)
-        # and output arrays of shape (*, 32)
-
-        # this is equivalent to the above:
-        model = Sequential()
-        model.add(Dense(32, input_shape=(16,)))
-
-        # after the first layer, you don't need to specify
-        # the size of the input anymore:
-        model.add(Dense(32))
-    ```
-
-    # Arguments
-        output_dim: int > 0.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)),
-            or alternatively, Theano function to use for weights
-            initialization. This parameter is only relevant
-            if you don't pass a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of Numpy arrays to set as initial weights.
-            The list should have 2 elements, of shape `(input_dim, output_dim)`
-            and (output_dim,) for weights and biases respectively.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        bias: whether to include a bias (i.e. make the layer affine rather than linear).
-        input_dim: dimensionality of the input (integer).
-            This argument (or alternatively, the keyword argument `input_shape`)
-            is required when using this layer as the first layer in a model.
-
-    # Input shape
-        2D tensor with shape: `(nb_samples, input_dim)`.
-
-    # Output shape
-        2D tensor with shape: `(nb_samples, output_dim)`.
-    '''
-    def __init__(self, sum_axes, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None,
-                 bias=True, input_dim=None, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.sum_axes = tuple(sum_axes)
-        self.input_dim = input_dim
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.b_regularizer = regularizers.get(b_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-        self.b_constraint = constraints.get(b_constraint)
-
-        self.bias = bias
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=4)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(FilterDimSum4, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 4
-        input_dim1 = input_shape[1]
-        input_dim2 = input_shape[2]
-        input_dim3 = input_shape[3]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim1, input_dim2, input_dim3))]
-
-        self.W = self.init((input_dim1, input_dim2, input_dim3),
-                           name='{}_W'.format(self.name))
-
-        if self.bias:
-            bias_size = [1, input_dim1, input_dim2, input_dim3]
-            bias_size = tuple([bias_size[i] for i in set(range(4)) - set(self.sum_axes)])
-            self.b = K.zeros(bias_size[1:],
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
-        else:
-            self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    def call(self, x, mask=None):
-        output = K.sum(x * self.W, axis=self.sum_axes)
-        if self.bias:
-            output += self.b
-        return self.activation(output)
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 4
-        output_shape = [input_shape[0], input_shape[1], input_shape[2], input_shape[3]]
-        output_shape = [output_shape[i] for i in set(range(4)) - set(self.sum_axes)]
-        return tuple(output_shape)
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'bias': self.bias,
-                  'input_dim': self.input_dim}
-        base_config = super(FilterDimSum4, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-class FilterDimSum5(Layer):
-    '''Just your regular fully connected NN layer.
-
-    # Example
-
-    ```python
-        # as first layer in a sequential model:
-        model = Sequential()
-        model.add(Dense(32, input_dim=16))
-        # now the model will take as input arrays of shape (*, 16)
-        # and output arrays of shape (*, 32)
-
-        # this is equivalent to the above:
-        model = Sequential()
-        model.add(Dense(32, input_shape=(16,)))
-
-        # after the first layer, you don't need to specify
-        # the size of the input anymore:
-        model.add(Dense(32))
-    ```
-
-    # Arguments
-        output_dim: int > 0.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)),
-            or alternatively, Theano function to use for weights
-            initialization. This parameter is only relevant
-            if you don't pass a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of Numpy arrays to set as initial weights.
-            The list should have 2 elements, of shape `(input_dim, output_dim)`
-            and (output_dim,) for weights and biases respectively.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        bias: whether to include a bias (i.e. make the layer affine rather than linear).
-        input_dim: dimensionality of the input (integer).
-            This argument (or alternatively, the keyword argument `input_shape`)
-            is required when using this layer as the first layer in a model.
-
-    # Input shape
-        2D tensor with shape: `(nb_samples, input_dim)`.
-
-    # Output shape
-        2D tensor with shape: `(nb_samples, output_dim)`.
-    '''
-    def __init__(self, sum_axes, filter_axes, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None,
-                 bias=True, input_dim=None, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.sum_axes = tuple(sum_axes)
-        self.filter_axes = tuple(filter_axes)
-        self.input_dim = input_dim
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.b_regularizer = regularizers.get(b_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-        self.b_constraint = constraints.get(b_constraint)
-
-        self.bias = bias
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=5)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(FilterDimSum5, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 5
-        input_dim1 = input_shape[1]
-        input_dim2 = input_shape[2]
-        input_dim3 = input_shape[3]
-        input_dim4 = input_shape[4]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim1, input_dim2, input_dim3, input_dim4))]
-
-        w_shape = [1] * 4
-        for i in self.filter_axes:
-            w_shape[i-1] = input_shape[i]
-
-        self.W = self.init(w_shape,
-                           name='{}_W'.format(self.name))
-
-        if self.bias:
-            bias_size = [1, input_dim1, input_dim2, input_dim3, input_dim4]
-            bias_size = tuple([bias_size[i] for i in set(range(5)) - set(self.sum_axes)])
-            self.b = K.zeros(bias_size[1:],
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
-        else:
-            self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    def call(self, x, mask=None):
-        output = K.sum(x * self.W, axis=self.sum_axes)
-        if self.bias:
-            output += self.b
-        return self.activation(output)
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 5
-        output_shape = [input_shape[0], input_shape[1], input_shape[2], input_shape[3], input_shape[4]]
-        output_shape = [output_shape[i] for i in set(range(5)) - set(self.sum_axes)]
-        return tuple(output_shape)
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'bias': self.bias,
-                  'input_dim': self.input_dim}
-        base_config = super(FilterDimSum5, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
 class FilterDims(Layer):
+    '''The layer lets you filter any arbitrary set of axes by projection onto a new axis.
+    This is can be useful for reducing dimensionality and/or regularizing spatio-temporal models or other
+    models of structured data.
+
+    # Example
+
+    ```python
+        # As a temporal filter in a 5D spatio-temporal model with input shape (#samples, 12, 3, 30, 30)
+        # The input has 12 time steps, 3 color channels and X and Y of size 30:
+
+        model = Sequential()
+        model.add(TimeDistributed(Convolution2D(10, 5, 5, activation='linear', subsample=(2, 2)), input_shape=(12, 3, 30, 30)))
+
+        # The output from the previous layer has shape (#samples, 12, 10, 12, 12)
+        # We can use FilterDims to filter the 12 time steps on axis 1 by projeciton onto a new axis of 5 dimensions with a 12x5 matrix:
+
+        model.add(FilterDims(nb_filters=5, sum_axes=[1], filter_axes=[1], bias=False))
+
+        # The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions
+        # The output dimensionality is (#samples, 5, 10, 12, 12)
+        # We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map
+        # dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
+
+        model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
+
+        # The output dimensionality is (#samples, 2, 12, 12)
+        # We can then use FilterDims to spatially filter each spatio-temporal dimension with a 2x12x12 tensor:
+
+        model.add(FilterDims(nb_filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
+
+        # We only sum over the last two spatial axes resutling in an output dimensionality of (#samples, 2)
+    ```
+
+    # Arguments
+        nb_filters: number of filters to apply.
+        filter_axes: a list of the axes of the input to filter
+        sum_axes: a list of the axes of the input that should be summed across after filtering
+        init: name of initialization function for the weights of the layer
+            (see [initializations](../initializations.md)),
+            or alternatively, Theano function to use for weights
+            initialization. This parameter is only relevant
+            if you don't pass a `weights` argument.
+        activation: name of activation function to use
+            (see [activations](../activations.md)),
+            or alternatively, elementwise Theano function.
+            If you don't specify anything, no activation is applied
+            (ie. "linear" activation: a(x) = x).
+        weights: list of Numpy arrays to set as initial weights.
+            The list should have 2 elements, of shape `(input_dim, output_dim)`
+            and (output_dim,) for weights and biases respectively.
+        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
+            (eg. L1 or L2 regularization), applied to the main weights matrix.
+        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
+            applied to the bias.
+        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
+            applied to the network output.
+        W_constraint: instance of the [constraints](../constraints.md) module
+            (eg. maxnorm, nonneg), applied to the main weights matrix.
+        b_constraint: instance of the [constraints](../constraints.md) module,
+            applied to the bias.
+        bias: whether to include a bias (i.e. make the layer affine rather than linear).
+        input_dim: dimensionality of the input (integer).
+            This argument (or alternatively, the keyword argument `input_shape`)
+            is required when using this layer as the first layer in a model.
+
+    # Input shape
+        ND tensor with arbitrary shape.
+
+    # Output shape
+        ND tensor with shape determined by input and arguments.
+    '''
     def __init__(self, nb_filters, sum_axes, filter_axes, init='glorot_uniform', activation='linear', weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
@@ -640,14 +309,12 @@ class FilterDims(Layer):
 
         self.bias = bias
         self.initial_weights = weights
-        # self.input_spec = [InputSpec(ndim=5)]
 
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
         super(FilterDims, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        # assert len(input_shape) == 5
         self.input_spec = [InputSpec(shape=input_shape)]
         ndim = len(input_shape)
 
@@ -1794,101 +1461,3 @@ class GaussianMixtureDensity(Layer):
                   'input_dim': self.input_dim}
         base_config = super(Dense, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-class Reorganize(Layer):
-    '''Just your regular fully connected NN layer.
-
-    # Example
-
-    ```python
-        # as first layer in a sequential model:
-        model = Sequential()
-        model.add(Dense(32, input_dim=16))
-        # now the model will take as input arrays of shape (*, 16)
-        # and output arrays of shape (*, 32)
-
-        # this is equivalent to the above:
-        model = Sequential()
-        model.add(Dense(32, input_shape=(16,)))
-
-        # after the first layer, you don't need to specify
-        # the size of the input anymore:
-        model.add(Dense(32))
-    ```
-
-    # Arguments
-        output_dim: int > 0.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)),
-            or alternatively, Theano function to use for weights
-            initialization. This parameter is only relevant
-            if you don't pass a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of numpy arrays to set as initial weights.
-            The list should have 2 elements, of shape `(input_dim, output_dim)`
-            and (output_dim,) for weights and biases respectively.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        bias: whether to include a bias (i.e. make the layer affine rather than linear).
-        input_dim: dimensionality of the input (integer).
-            This argument (or alternatively, the keyword argument `input_shape`)
-            is required when using this layer as the first layer in a model.
-
-    # Input shape
-        2D tensor with shape: `(nb_samples, input_dim)`.
-
-    # Output shape
-        2D tensor with shape: `(nb_samples, output_dim)`.
-    '''
-    def __init__(self, input_dim=None, init='glorot_uniform', **kwargs):
-        self.init = initializations.get(init)
-        self.output_dim = input_dim
-        self.input_dim = input_dim
-
-
-        self.input_spec = [InputSpec(ndim=2)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(Reorganize, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 2
-        input_dim = input_shape[1]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim))]
-
-        self.W = self.init((input_dim, input_dim),
-                           name='{}_W'.format(self.name))
-
-        self.trainable_weights = [self.W]
-
-    def call(self, x, mask=None):
-        w = K.softmax(100*self.W)
-        output = K.dot(x, w)
-
-        return output
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 2
-        return (input_shape[0], input_shape[1])
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'input_dim': self.input_dim}
-        base_config = super(Reorganize, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-

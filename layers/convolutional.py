@@ -1201,7 +1201,7 @@ class Convolution2DColorEnergy_DelayBasis9(Layer):
 
 
 class Convolution2DColorEnergy_DelayBasis10(Layer):
-    def __init__(self, nb_filter_simple, nb_filter_complex, nb_row, nb_col, delays, delay_basis, shift_basis, color_chans=3,
+    def __init__(self, nb_filter_simple, nb_filter_complex, nb_row, nb_col, delays, delay_basis, shift_basis, color_chans=3, tf_max=2,
                  init='glorot_uniform', activation='relu', weights=None,
                  border_mode='valid', subsample=(1, 1), dim_ordering=K.image_dim_ordering(),
                  W_regularizer=None, Wt_regularizer=None, b_regularizer=None, activity_regularizer=None,
@@ -1225,6 +1225,7 @@ class Convolution2DColorEnergy_DelayBasis10(Layer):
         assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
         self.dim_ordering = dim_ordering
         self.color_chans = color_chans
+        self.tf_max = tf_max
 
         self.W_regularizer = regularizers.get(W_regularizer)
         self.Wt_regularizer = regularizers.get(Wt_regularizer)
@@ -1255,7 +1256,7 @@ class Convolution2DColorEnergy_DelayBasis10(Layer):
         self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
         self.Wt = self.init((self.delays, self.delay_basis), name='{}_Wt'.format(self.name))
         step = 2./(self.shift_basis-1.)
-        steps = np.arange(0, 2+step, step)[:self.shift_basis] - 1.
+        steps = 2.*self.tf_max*(np.arange(0, 2+step, step)[:self.shift_basis] - 1.)
         self.delays_pi = K.variable(np.pi*np.arange(0, 1+1./(self.delays-1), 1./(self.delays-1)), name='{}_delays_pi'.format(self.name))
         self.Ws = K.variable(steps, name='{}_Ws'.format(self.name))
 
