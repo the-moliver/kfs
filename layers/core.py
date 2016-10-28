@@ -319,26 +319,28 @@ class FilterDims(Layer):
         ndim = len(input_shape)
 
         w_shape = [1] * (ndim - 1)
-        broadcast = [False] * (ndim - 1)
+        W_broadcast = [False] * (ndim - 1)
+        b_broadcast = [True] * (ndim - 1)
         for i in self.filter_axes:
             w_shape[i-1] = input_shape[i]
 
         if self.nb_filters > 1:
             w_shape.append(self.nb_filters)
-            broadcast.append(False)
+            W_broadcast.append(False)
+            b_broadcast.append(False)
 
         for i in set(range(1, ndim)) - set(self.filter_axes):
-            broadcast[i-1] = True
+            W_broadcast[i-1] = True
 
         self.W = self.init(w_shape,
                            name='{}_W'.format(self.name))
 
-        self.broadcast = broadcast
 
         if self.bias:
             bias_size = [1] * (ndim - 1)
             for i in set(self.filter_axes) - set(self.sum_axes):
                 bias_size[i-1] = input_shape[i]
+                b_broadcast[i-1] = False
 
             if self.nb_filters > 1:
                 bias_size.append(self.nb_filters)
@@ -348,6 +350,9 @@ class FilterDims(Layer):
             self.trainable_weights = [self.W, self.b]
         else:
             self.trainable_weights = [self.W]
+
+        self.W_broadcast = W_broadcast
+        self.b_broadcast = b_broadcast
 
         self.regularizers = []
         if self.W_regularizer:
@@ -389,30 +394,31 @@ class FilterDims(Layer):
             x = K.reshape(x, (-1, W.shape[0]))
             output = K.reshape(K.dot(x, W), outdims)
             if self.bias:
+            	b_broadcast = [i for j, i in enumerate(self.b_broadcast) if j not in self.sum_axes]
                 b = K.squeeze(self.b, self.sum_axes[0])
                 if len(self.sum_axes) > 1:
                     b = K.squeeze(b, self.sum_axes[1] - 1)
-                output += b
+                output += T.patternbroadcast(self.b, b_broadcast)
             output = K.permute_dimensions(output, permute_dims)
 
         elif self.nb_filters > 1:
-            bcast = list(np.where(self.broadcast)[0])
+            # bcast = list(np.where(self.broadcast)[0])
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]
-            self.W = T.addbroadcast(self.W, *bcast)
-            output = K.sum(x[..., None] * self.W, axis=self.sum_axes, keepdims=True)
-            self.W = T.unbroadcast(self.W, *bcast)
+            # self.W = T.addbroadcast(self.W, *bcast)
+            output = K.sum(x[..., None] * T.patternbroadcast(self.W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+            # self.W = T.unbroadcast(self.W, *bcast)
             if self.bias:
-                output += self.b
+                output += T.patternbroadcast(self.b, self.b_broadcast)
             output = K.squeeze(K.permute_dimensions(output, permute_dims), ndim)
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1])
 
         else:
-            output = K.sum(x * self.W, axis=self.sum_axes, keepdims=True)
+            output = K.sum(x * T.patternbroadcast(self.W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
             if self.bias:
-                output += self.b
+                output += T.patternbroadcast(self.b, self.b_broadcast)
             output = K.squeeze(output, self.sum_axes[0])
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1]-1)
