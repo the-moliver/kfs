@@ -337,7 +337,7 @@ class FilterDims(Layer):
 
         if self.bias:
             bias_size = [1] * (ndim - 1)
-            for i in set(range(1, ndim)) - set(self.sum_axes):
+            for i in set(self.filter_axes) - set(self.sum_axes):
                 bias_size[i-1] = input_shape[i]
 
             if self.nb_filters > 1:
