@@ -398,7 +398,7 @@ class FilterDims(Layer):
                 b = K.squeeze(self.b, self.sum_axes[0])
                 if len(self.sum_axes) > 1:
                     b = K.squeeze(b, self.sum_axes[1] - 1)
-                output += T.patternbroadcast(self.b, b_broadcast)
+                output += T.patternbroadcast(b, b_broadcast)
             output = K.permute_dimensions(output, permute_dims)
 
         elif self.nb_filters > 1:
