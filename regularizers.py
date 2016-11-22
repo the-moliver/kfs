@@ -29,30 +29,14 @@ class XCovWeightRegularizer(Regularizer):
                 "axis": self.axis}
 
 
-class OrthogonalWeightRegularizer(Regularizer):
-    def __init__(self, l=1.):
-        self.l = l
-
-    def set_param(self, p1, p2):
-        self.p1 = p1
-        self.p2 = p2
-
-    def __call__(self, loss):
-        loss += K.sum(K.sum(self.p1 * self.p2, axis=-1)**2) * self.l
-        return loss
-
-    def get_config(self):
-        return {"name": self.__class__.__name__,
-                "l": self.l}
-
-
-class OrthogonalActivityRegularizer(Regularizer):
-    def __init__(self, gamma=0., axis=1):
+class XCovActivityRegularizer(Regularizer):
+    def __init__(self, gamma=0., axis=1, division_idx=None):
         self.gamma = K.cast_to_floatx(gamma)
         self.uses_learning_phase = True
         self.layer = None
         self.axis = []
         self.axis.append(axis)
+        self.division_idx = division_idx
 
     def set_layer(self, layer):
         self.layer = layer
@@ -69,30 +53,12 @@ class OrthogonalActivityRegularizer(Regularizer):
             output = K.permute_dimensions(output, dimorder)
             output = output.reshape((output.shape[0], -1))
             output -= K.mean(output, axis=1, keepdims=True)
-            regularized_loss += K.sum(K.square(K.dot(output, output.T)/output.shape[1]))
+            if self.division_idx is not None:
+                regularized_loss += .5*K.sum(K.square(K.dot(output[:self.dividx], output[self.dividx:].T)/output.shape[1]))
+            else:
+                regularized_loss += .5*K.sum(K.square(K.dot(output, output.T)/output.shape[1]))
 
         return K.in_train_phase(regularized_loss, loss)
-        
-
-    def get_config(self):
-        return {"name": self.__class__.__name__,
-                "gamma": self.gamma}
-
-
-class XCovActivityRegularizer(Regularizer):
-    def __init__(self, gamma=0., dividx=1):
-        self.gamma = gamma
-        self.dividx = dividx
-
-    def set_layer(self, layer):
-        self.layer = layer
-
-    def __call__(self, loss):
-        output = self.layer.get_output(True)
-        output -= K.mean(output, axis=0)
-        pen = .5*K.sum(K.square(K.dot(output[:, :self.dividx].T, output[:, self.dividx:])/output.shape[0]))
-        loss += self.gamma*pen
-        return loss
 
     def get_config(self):
         return {"name": self.__class__.__name__,
