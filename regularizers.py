@@ -47,18 +47,32 @@ class OrthogonalWeightRegularizer(Regularizer):
 
 
 class OrthogonalActivityRegularizer(Regularizer):
-    def __init__(self, gamma=0.):
-        self.gamma = gamma
+    def __init__(self, gamma=0., axis=1):
+        self.gamma = K.cast_to_floatx(gamma)
+        self.uses_learning_phase = True
+        self.layer = None
+        self.axis = []
+        self.axis.append(axis)
 
     def set_layer(self, layer):
         self.layer = layer
 
     def __call__(self, loss):
-        output = self.layer.get_output(True)
-        output -= K.mean(output, axis=0)
-        pen = K.sum(K.square(K.dot(output.T, output)/output.shape[0]))
-        loss += self.gamma*pen
-        return loss
+        if self.layer is None:
+            raise Exception('Need to call `set_layer` on '
+                            'ActivityRegularizer instance '
+                            'before calling the instance.')
+        regularized_loss = loss
+        for i in range(len(self.layer.inbound_nodes)):
+            output = self.layer.get_output_at(i)
+            dimorder = self.axis + list(set(range(K.ndim(output))) - set(self.axis))
+            output = K.permute_dimensions(output, dimorder)
+            output = output.reshape((output.shape[0], -1))
+            output -= K.mean(output, axis=1, keepdims=True)
+            regularized_loss += K.sum(K.square(K.dot(output, output.T)/output.shape[1]))
+
+        return K.in_train_phase(regularized_loss, loss)
+        
 
     def get_config(self):
         return {"name": self.__class__.__name__,
@@ -84,6 +98,43 @@ class XCovActivityRegularizer(Regularizer):
         return {"name": self.__class__.__name__,
                 "gamma": self.gamma}
 
+
+class StochasticWeightRegularizer(Regularizer):
+
+    def __init__(self, l1=0., l2=0., axis=0):
+        self.l1 = K.cast_to_floatx(l1)
+        self.l2 = K.cast_to_floatx(l2)
+        self.uses_learning_phase = True
+        self.p = None
+        self.axis = axis
+
+    def set_param(self, p):
+        if self.p is not None:
+            raise Exception('Regularizers cannot be reused. '
+                            'Instantiate one regularizer per layer.')
+        self.p = p
+
+    def __call__(self, loss):
+        if self.p is None:
+            raise Exception('Need to call `set_param` on '
+                            'WeightRegularizer instance '
+                            'before calling the instance. '
+                            'Check that you are not passing '
+                            'a WeightRegularizer instead of an '
+                            'ActivityRegularizer '
+                            '(i.e. activity_regularizer="l2" instead '
+                            'of activity_regularizer="activity_l2".')
+        regularized_loss = loss
+        if self.l1:
+            regularized_loss += self.l1 * K.sum(K.abs(K.sum(self.p, axis=self.axis) - 1.))
+        if self.l2:
+            regularized_loss += self.l2 * K.sum(K.square(K.sum(self.p, axis=self.axis) - 1.))
+        return K.in_train_phase(regularized_loss, loss)
+
+    def get_config(self):
+        return {'name': self.__class__.__name__,
+                'l1': float(self.l1),
+                'l2': float(self.l2)}
 
 
 class LaplacianRegularizer(Regularizer):
