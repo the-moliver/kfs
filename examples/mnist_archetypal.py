@@ -29,6 +29,9 @@ X_train /= 255
 print(X_train.shape[0], 'train samples')
 
 
+def mean_abs_error(y_true, y_pred):
+    return K.mean(K.abs(y_pred - y_true))
+
 model = Sequential()
 model.add(FilterDims(nb_filters=20, sum_axes=[1], filter_axes=[1], input_shape=(60000, 784,), bias=False, W_constraint=Stochastic(axis=0)))
 model.add(CoupledGaussianDropout())
@@ -36,7 +39,7 @@ model.add(FilterDims(nb_filters=60000, sum_axes=[1], filter_axes=[1], bias=False
 
 model.summary()
 
-model.compile(loss='mae',
+model.compile(loss=mean_abs_error,
               optimizer=Adam())
 
 history = model.fit(X_train, X_train,

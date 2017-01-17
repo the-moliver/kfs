@@ -10,8 +10,6 @@ from keras.layers.convolutional import conv_output_length
 
 # Differentiable Preprocessing for fMRI
 
-
-
 class ImageOpt(Layer):
     def __init__(self):
         super(ImageOpt, self).__init__()
@@ -59,10 +57,6 @@ class TemporalFilter(Layer):
         super(TemporalFilter, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        # input_dim = input_shape[2]
-        # self.W_shape = (self.nb_filter, input_dim, self.filter_length, 1)
-        # self.W = self.init(self.W_shape, name='{}_W'.format(self.name))
-        # self.b = K.zeros((self.nb_filter,), name='{}_b'.format(self.name))
         if self.real_filts is not None:
             self.W_r = K.variable(self.real_filts, name='{}_W_r'.format(self.name))
         if self.complex_filts is not None:
@@ -78,7 +72,6 @@ class TemporalFilter(Layer):
 
     def call(self, x, mask=None):
         x = K.permute_dimensions(x, (0, 2, 1))
-        # x = K.squeeze(x, axis=0)
         x = K.reshape(x, (-1, self.input_length))
         x = K.expand_dims(x, 1)
         x = K.expand_dims(x, -1)
@@ -114,7 +107,6 @@ class TemporalFilter(Layer):
                   'input_length': self.input_length}
         base_config = super(TemporalFilter, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
 
 
 class Rescale(Layer):
@@ -154,47 +146,4 @@ class Rescale(Layer):
         config = {'output_dim': self.output_dim,
                   'input_dim': self.input_dim}
         base_config = super(Rescale, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-class FixedDense(Layer):
-    '''Fixed Weights from ridge, etc.
-    '''
-    def __init__(self, weights, biases, input_dim=None, **kwargs):
-
-        self.input_dim = weights.shape[0]
-        self.output_dim = weights.shape[1]
-
-        self.weights = weights
-        self.biases = biases
-
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=2)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(FixedDense, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 2
-        input_dim = input_shape[1]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim))]
-
-        self.W = K.variable(self.weights,
-                            name='{}_W'.format(self.name))
-        self.b = K.variable(self.biases,
-                            name='{}_b'.format(self.name))
-
-    def call(self, x, mask=None):
-        return K.dot(x, self.W) + self.b
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 2
-        return (input_shape[0], self.output_dim)
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'input_dim': self.input_dim}
-        base_config = super(FixedDense, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
