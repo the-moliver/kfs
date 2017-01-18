@@ -59,3 +59,29 @@ Check the [examples folder](https://github.com/the-moliver/kfs/tree/master/examp
 
 
 ------------------
+### Additional Regularization Options
+* `TVRegularizer` Total-Variation (TV) and Total-Variation of the gradient (TV2) regularization applied along specific axes of the weight tensor.
+* `LaplacianRegularizer` Regularizer for L1 and L2 Norm of the Laplacian operator applied along a specific axis of the weight tensor.
+* `XCovRegularizer` Cross-Covariance Regularization of hidden unit activity, useful for disentagling factors by penalizing similar representations
+
+### Applying weights to arbitrary axes
+* `FilterDims` The layer lets you filter any arbitrary set of axes by projection onto a new axis. This function is very flexible and incredibly useful for reducing dimensionality and/or regularizing spatio-temporal models or other models of structured data.
+
+For example, in a 5D spatio-temporal model with input shape (#samples, 12, 3, 30, 30) the input has 12 time steps, 3 color channels and X and Y of size 30:
+```python
+model = Sequential()
+model.add(TimeDistributed(Convolution2D(10, 5, 5, activation='linear', subsample=(2, 2)), input_shape=(12, 3, 30, 30)))
+```
+The output from the previous layer has shape (#samples, 12, 10, 13, 13). We can use FilterDims to filter the 12 time steps on axis 1 by projeciton onto a new axis of 5 dimensions with a 12x5 matrix:
+```python
+model.add(FilterDims(nb_filters=5, sum_axes=[1], filter_axes=[1], bias=False))
+```        
+The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions. The output dimensionality is (#samples, 5, 10, 13, 13). We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
+```python
+model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
+``` 
+The output dimensionality is (#samples, 2, 13, 13) since we have collapsed dimensions [1, 2]. We can then use FilterDims to separately spatially filter the output of each spatio-temporal filter with a 2x13x13 tensor:
+```python
+model.add(FilterDims(nb_filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
+```
+We only sum over the last two spatial axes resutling in an output dimensionality of (#samples, 2).
