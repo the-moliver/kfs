@@ -115,8 +115,8 @@ class TVRegularizer(Regularizer):
     regularization applied along specific axes of the weight tensor.
 
     # Arguments
-        l1: Float; L1 regularization factor.
-        l2: Float; L2 regularization factor.
+        TV: Float; TV regularization factor.
+        TV2: Float; TV2 regularization factor.
         axis: Int; Axis along which to compute Laplacian operator
 
     # References
@@ -131,12 +131,11 @@ class TVRegularizer(Regularizer):
     def __call__(self, x):
         regularization = 0
         dimorder = self.axes + list(set(range(K.ndim(x))) - set(self.axes))
-        x = K.permute_dimensions(x, dimorder)
-
+        p = K.permute_dimensions(x, dimorder)
         if self.TV:
-            regularization += K.sum(K.sqrt(K.square(diffr(x)) + K.square(diffc(x)) + K.epsilon()))
+            regularization += self.TV*K.sum(K.sqrt(K.square(diffr(p)) + K.square(diffc(p)) + K.epsilon()))
         if self.TV2:
-            regularization += K.sum(K.sqrt(K.square(diffrr(x)) + K.square(diffcc(x)) + 2*K.square(diffrc(x)) + K.epsilon()))
+            regularization += self.TV2*K.sum(K.sqrt(K.square(diffrr(p)) + K.square(diffcc(p)) + 2*K.square(diffrc(p)) + K.epsilon()))
         return regularization
 
     def get_config(self):

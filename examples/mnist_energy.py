@@ -20,7 +20,7 @@ nb_epoch = 30
 # input image dimensions
 img_rows, img_cols = 28, 28
 # number of convolutional filters to use
-nb_filters = 32
+nb_filters = 6
 # size of pooling area for max pooling
 pool_size = (2, 2)
 # convolution kernel size
@@ -52,11 +52,11 @@ Y_test = np_utils.to_categorical(y_test, nb_classes)
 
 model = Sequential()
 
-model.add(Convolution2DEnergy(0, 6, kernel_size[0], kernel_size[1],
+model.add(Convolution2DEnergy(0, nb_filters, kernel_size[0], kernel_size[1],
                         border_mode='valid',
                         input_shape=input_shape))
 model.add(AveragePooling2D(pool_size=pool_size))
-model.add(Convolution2DEnergy_Scatter(0, 6, kernel_size[0], kernel_size[1]))
+model.add(Convolution2DEnergy_Scatter(0, nb_filters, kernel_size[0], kernel_size[1]))
 model.add(AveragePooling2D(pool_size=pool_size))
 model.add(Dropout(0.25))
 model.add(Flatten())
