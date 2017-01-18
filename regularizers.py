@@ -134,9 +134,9 @@ class TVRegularizer(Regularizer):
         x = K.permute_dimensions(x, dimorder)
 
         if self.TV:
-            regularization += K.sum(K.sqrt(K.square(diffr(x)) + K.square(diffc(x)) + K.epsilon()), axis=(0, 1))
+            regularization += K.sum(K.sqrt(K.square(diffr(x)) + K.square(diffc(x)) + K.epsilon()))
         if self.TV2:
-            regularization += K.sum(K.sqrt(K.square(diffrr(x)) + K.square(diffcc(x)) + 2*K.square(diffrc(x)) + K.epsilon()), axis=(0, 1))
+            regularization += K.sum(K.sqrt(K.square(diffrr(x)) + K.square(diffcc(x)) + 2*K.square(diffrc(x)) + K.epsilon()))
         return regularization
 
     def get_config(self):

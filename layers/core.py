@@ -2,21 +2,11 @@
 from __future__ import absolute_import
 from __future__ import division
 
-import numpy as np
-
-from collections import OrderedDict
-import copy
-from six.moves import zip
+import functools
 
 from keras import backend as K
 from keras import activations, initializations, regularizers, constraints
-from keras.regularizers import ActivityRegularizer
-from keras.engine import InputSpec, Layer, Merge
-import theano.tensor as T
-
-import marshal
-import types
-import sys
+from keras.engine import InputSpec, Layer
 
 
 class TemporalFilter(Layer):
@@ -112,7 +102,6 @@ class TemporalFilter(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
-
 class SpatialFilter(Layer):
     def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None, bias=False,
@@ -122,7 +111,6 @@ class SpatialFilter(Layer):
         self.output_dim = output_dim
         self.input_dim = input_dim
         self.bias = bias
-
 
         self.W_regularizer = regularizers.get(W_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
@@ -185,15 +173,13 @@ class SpatialFilter(Layer):
         stack_size = x.shape[2]
         dim1 = x.shape[3]
         dim2 = x.shape[4]
-        # dim = T.cast(X.shape[2]/self.stack_size), 'int64')
+
         x = K.reshape(x, (samps*maxlen*stack_size, dim1*dim2))
         W = K.reshape(self.W, (dim1*dim2, self.output_dim))
         output = K.reshape(K.dot(x, W), (samps, maxlen, stack_size, self.output_dim))
         if self.bias:
             output += self.b
         return self.activation(output)
-        # output = self.activation(K.dot(x, W))
-        # return K.reshape(output, (samps, maxlen, stack_size, self.output_dim))
 
     def get_output_shape_for(self, input_shape):
         assert input_shape and len(input_shape) == 5
@@ -331,8 +317,11 @@ class FilterDims(Layer):
         for i in set(range(1, ndim)) - set(self.filter_axes):
             W_broadcast[i-1] = True
 
-        self.W = self.init(w_shape,
-                           name='{}_W'.format(self.name))
+        self.W = self.add_weight(w_shape,
+                                 initializer=self.init,
+                                 name='{}_W'.format(self.name),
+                                 regularizer=self.W_regularizer,
+                                 constraint=self.W_constraint)
 
         if self.bias:
             bias_size = [1] * (ndim - 1)
@@ -343,37 +332,20 @@ class FilterDims(Layer):
             if self.nb_filters > 1:
                 bias_size.append(self.nb_filters)
 
-            self.b = K.zeros(bias_size,
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
+            self.b = self.add_weight(bias_size,
+                                     initializer='zero',
+                                     name='{}_b'.format(self.name),
+                                     regularizer=self.b_regularizer,
+                                     constraint=self.b_constraint)
         else:
-            self.trainable_weights = [self.W]
+            self.b = None
 
         self.W_broadcast = W_broadcast
         self.b_broadcast = b_broadcast
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+        self.built = True
 
     def call(self, x, mask=None):
         ndim = len(self.input_spec[0].shape)
@@ -397,7 +369,10 @@ class FilterDims(Layer):
                 b = K.squeeze(self.b, self.sum_axes[0])
                 if len(self.sum_axes) > 1:
                     b = K.squeeze(b, self.sum_axes[1] - 1)
-                output += T.patternbroadcast(b, b_broadcast)
+                if K.backend() == 'theano':
+                    output += K.pattern_broadcast(b, b_broadcast)
+                else:
+                    output += b
             output = K.permute_dimensions(output, permute_dims)
 
         elif self.nb_filters > 1:
@@ -405,19 +380,31 @@ class FilterDims(Layer):
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]
-            # self.W = T.addbroadcast(self.W, *bcast)
-            output = K.sum(x[..., None] * T.patternbroadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
-            # self.W = T.unbroadcast(self.W, *bcast)
+
+            if K.backend() == 'theano':
+                output = K.sum(x[..., None] * K.pattern_broadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+            else:
+                output = K.sum(x[..., None] * W, axis=self.sum_axes, keepdims=True)
+
             if self.bias:
-                output += T.patternbroadcast(self.b, self.b_broadcast)
+                if K.backend() == 'theano':
+                    output += K.pattern_broadcast(self.b, self.b_broadcast)
+                else:
+                    output += self.b
             output = K.squeeze(K.permute_dimensions(output, permute_dims), ndim)
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1])
 
         else:
-            output = K.sum(x * T.patternbroadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+            if K.backend() == 'theano':
+                output = K.sum(x * K.pattern_broadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+            else:
+                output = K.sum(x * W, axis=self.sum_axes, keepdims=True)
             if self.bias:
-                output += T.patternbroadcast(self.b, self.b_broadcast)
+                if K.backend() == 'theano':
+                    output += K.pattern_broadcast(self.b, self.b_broadcast)
+                else:
+                    output += self.b
             output = K.squeeze(output, self.sum_axes[0])
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1]-1)
@@ -831,197 +818,6 @@ class DenseEnergy(Layer):
                   'input_dim': self.input_dim}
         base_config = super(DenseEnergy, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-class Convolution2DEnergy(Layer):
-    '''Convolution operator for filtering windows of two-dimensional inputs.
-    When using this layer as the first layer in a model,
-    provide the keyword argument `input_shape`
-    (tuple of integers, does not include the sample axis),
-    e.g. `input_shape=(3, 128, 128)` for 128x128 RGB pictures.
-
-    # Input shape
-        4D tensor with shape:
-        `(samples, channels, rows, cols)` if dim_ordering='th'
-        or 4D tensor with shape:
-        `(samples, rows, cols, channels)` if dim_ordering='tf'.
-
-    # Output shape
-        4D tensor with shape:
-        `(samples, nb_filter, nb_row, nb_col)` if dim_ordering='th'
-        or 4D tensor with shape:
-        `(samples, nb_row, nb_col, nb_filter)` if dim_ordering='tf'.
-
-
-    # Arguments
-        nb_filter: Number of convolution filters to use.
-        nb_row: Number of rows in the convolution kernel.
-        nb_col: Number of columns in the convolution kernel.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)), or alternatively,
-            Theano function to use for weights initialization.
-            This parameter is only relevant if you don't pass
-            a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of numpy arrays to set as initial weights.
-        border_mode: 'valid' or 'same'.
-        subsample: tuple of length 2. Factor by which to subsample output.
-            Also called strides elsewhere.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        dim_ordering: 'th' or 'tf'. In 'th' mode, the channels dimension
-            (the depth) is at index 1, in 'tf' mode is it at index 3.
-    '''
-    input_ndim = 4
-
-    def __init__(self, nb_filter, nb_row, nb_col,
-                 init='glorot_uniform', activation='linear', weights=None,
-                 border_mode='valid', subsample=(1, 1), dim_ordering='th',
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None, **kwargs):
-
-        if border_mode not in {'valid', 'same'}:
-            raise Exception('Invalid border mode for Convolution2D:', border_mode)
-        self.nb_filter = nb_filter
-        self.nb_row = nb_row
-        self.nb_col = nb_col
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        assert border_mode in {'valid', 'same'}, 'border_mode must be in {valid, same}'
-        self.border_mode = border_mode
-        self.subsample = tuple(subsample)
-        assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
-        self.dim_ordering = dim_ordering
-
-        self.W1_regularizer = regularizers.get(W_regularizer)
-        self.W2_regularizer = regularizers.get(W_regularizer)
-        self.b_regularizer = regularizers.get(b_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-        self.b_constraint = constraints.get(b_constraint)
-        self.constraints = [self.W_constraint, self.W_constraint, self.b_constraint]
-
-        self.initial_weights = weights
-        self.input = K.placeholder(ndim=4)
-        super(Convolution2DEnergy, self).__init__(**kwargs)
-
-    def build(self):
-        if self.dim_ordering == 'th':
-            stack_size = self.input_shape[1]
-            self.W_shape = (self.nb_filter, stack_size, self.nb_row, self.nb_col)
-        elif self.dim_ordering == 'tf':
-            stack_size = self.input_shape[3]
-            self.W_shape = (self.nb_row, self.nb_col, stack_size, self.nb_filter)
-        else:
-            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-        self.W1 = self.init(self.W_shape)
-        self.W2 = self.init(self.W_shape)
-        self.b = K.zeros((self.nb_filter,))
-        self.params = [self.W1, self.W2, self.b]
-        self.regularizers = []
-
-        if self.W1_regularizer:
-            self.W1_regularizer.set_param(self.W1)
-            self.regularizers.append(self.W_regularizer)
-            self.W2_regularizer.set_param(self.W2)
-            self.regularizers.append(self.W2_regularizer)
-
-        if self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    @property
-    def output_shape(self):
-        input_shape = self.input_shape
-        if self.dim_ordering == 'th':
-            rows = input_shape[2]
-            cols = input_shape[3]
-        elif self.dim_ordering == 'tf':
-            rows = input_shape[1]
-            cols = input_shape[2]
-        else:
-            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-
-        rows = conv_output_length(rows, self.nb_row,
-                                  self.border_mode, self.subsample[0])
-        cols = conv_output_length(cols, self.nb_col,
-                                  self.border_mode, self.subsample[1])
-
-        if self.dim_ordering == 'th':
-            return (input_shape[0], self.nb_filter, rows, cols)
-        elif self.dim_ordering == 'tf':
-            return (input_shape[0], rows, cols, self.nb_filter)
-        else:
-            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        X = K.reshape(X, (self.input_shape[0]*self.input_shape[1], 1, self.input_shape[2], self.input_shape[3]))
-        if self.dim_ordering == 'th':
-            axis = [1, 2, 3]
-        elif self.dim_ordering == 'tf':
-        	axis = [0, 1, 2]
-        W1 = self.W1
-        W2 = self.W2 - W1*K.sum(W1*self.W2, axis=axis, keepdims=True)/K.sum(W1*W1, axis=axis, keepdims=True)
-        conv_out1 = K.conv2d(X, W1, strides=self.subsample,
-                            border_mode=self.border_mode,
-                            dim_ordering=self.dim_ordering,
-                            image_shape=self.input_shape,
-                            filter_shape=self.W_shape)
-        conv_out2 = K.conv2d(X, W2, strides=self.subsample,
-                            border_mode=self.border_mode,
-                            dim_ordering=self.dim_ordering,
-                            image_shape=self.input_shape,
-                            filter_shape=self.W_shape)
-        conv_out = K.sqrt(K.square(conv_out1) + K.square(conv_out2) + K.epsilon())
-        if self.dim_ordering == 'th':
-            output = conv_out + K.reshape(self.b, (1, self.nb_filter, 1, 1))
-        elif self.dim_ordering == 'tf':
-            output = conv_out + K.reshape(self.b, (1, 1, 1, self.nb_filter))
-        else:
-            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-        output = K.reshape(output, (self.input_shape[0], self.input_shape[1]*output.shape[1], output.shape[2], output.shape[3]))
-        return output
-
-    def get_config(self):
-        config = {'name': self.__class__.__name__,
-                  'nb_filter': self.nb_filter,
-                  'nb_row': self.nb_row,
-                  'nb_col': self.nb_col,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'border_mode': self.border_mode,
-                  'subsample': self.subsample,
-                  'dim_ordering': self.dim_ordering,
-                  'W1_regularizer': self.W1_regularizer.get_config() if self.W1_regularizer else None,
-                  'W2_regularizer': self.W2_regularizer.get_config() if self.W2_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None}
-        base_config = super(Convolution2DEnergy, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
 
 
 def conv_output_length(input_length, filter_size, border_mode, stride):
