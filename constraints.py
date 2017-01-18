@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 from keras import backend as K
 from keras.constraints import Constraint
-import theano
 import numpy as np
 if K.backend() == 'theano':
     from theano import tensor as T
