@@ -223,7 +223,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
     def call(self, x, mask=None):
         # input_shape = self.input_spec[0].shape
         # output_shape = [-1] + list(self.get_output_shape_for(input_shape)[1:])
-        xshape = x.shape
+        xshape = K.shape(x)
         x = K.reshape(x, (-1, xshape[2], xshape[3], xshape[4]))
 
         sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.Ws[None, :, None])*self.Wt[:, None, :], (-1, self.nb_temporal_amplitude*self.nb_temporal_freq))
@@ -241,11 +241,11 @@ class Convolution2DEnergy_TemporalBasis(Layer):
 
         if self.dim_ordering == 'th':
             # samps x delays x stack x X x Y
-            conv_out1 = conv_out1.dimshuffle(0, 2, 3, 4, 1)
+            conv_out1 = K.permute_dimensions(conv_out1, (0, 2, 3, 4, 1))
             # samps x stack x X x Y x delays
         elif self.dim_ordering == 'tf':
             # samps x delays x X x Y x stack
-            conv_out1 = conv_out1.dimshuffle(0, 4, 2, 3, 1)
+            conv_out1 = K.permute_dimensions(conv_out1, (0, 4, 2, 3, 1))
             # samps x stack x X x Y x delays
         else:
             raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
@@ -262,10 +262,10 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         output = K.concatenate([conv_out, conv_outlin], axis=1)
 
         if self.dim_ordering == 'th':
-            output = output.dimshuffle(0, 4, 1, 2, 3)
+            output = K.permute_dimensions(output, (0, 4, 1, 2, 3))
             # samps x nb_temporal_amplitude*nb_temporal_freq x stack x X x Y
         elif self.dim_ordering == 'tf':
-            output = output.dimshuffle(0, 4, 2, 3, 1)
+            output = K.permute_dimensions(output, (0, 4, 2, 3, 1))
             # samps x nb_temporal_amplitude*nb_temporal_freq x X x Y x stack
 
         if self.bias:
@@ -307,11 +307,9 @@ class Convolution2DEnergy_Scatter(Layer):
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
                  bias=True, **kwargs):
-        if K._BACKEND != 'theano':
-            raise Exception(self.__class__.__name__ +
-                            ' is currently only working with Theano backend.')
+
         if border_mode not in {'valid', 'same'}:
-            raise Exception('Invalid border mode for Convolution3D:', border_mode)
+            raise Exception('Invalid border mode for Convolution2DEnergy_Scatter:', border_mode)
         self.nb_filter_simple = nb_filter_simple
         self.nb_filter_complex = nb_filter_complex
         self.nb_row = nb_row
@@ -328,7 +326,7 @@ class Convolution2DEnergy_Scatter(Layer):
         self.b_regularizer = regularizers.get(b_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.W_constraint = constraints.UnitNormOrthogonal(nb_filter_complex)
+        self.W_constraint = constraints.UnitNormOrthogonal(nb_filter_complex, dim_ordering)
         self.b_constraint = constraints.get(b_constraint)
 
         self.bias = bias
@@ -396,7 +394,7 @@ class Convolution2DEnergy_Scatter(Layer):
     def call(self, x, mask=None):
         input_shape = self.input_spec[0].shape
         output_shape = [-1] + list(self.get_output_shape_for(input_shape)[1:])
-        xshape = x.shape
+        xshape = K.shape(x)
         if self.dim_ordering == 'th':
             x = K.reshape(x, (-1, 1, xshape[2], xshape[3]))
         elif self.dim_ordering == 'tf':
@@ -458,9 +456,7 @@ class Convolution2DEnergy(Layer):
                  W_regularizer=None, b_regularizer=None, activity_regularizer=None,
                  W_constraint=None, b_constraint=None,
                  bias=True, **kwargs):
-        if K._BACKEND != 'theano':
-            raise Exception(self.__class__.__name__ +
-                            ' is currently only working with Theano backend.')
+
         if border_mode not in {'valid', 'same'}:
             raise Exception('Invalid border mode for Convolution2DEnergy:', border_mode)
         self.nb_filter_simple = nb_filter_simple
