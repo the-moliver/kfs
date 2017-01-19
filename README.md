@@ -108,6 +108,11 @@ We only sum over the last two spatial axes resutling in an output dimensionality
 * `DivisiveNormalization` A layer where the output consists of the inputs divided by a weighted combination of the inputs.
 * `Feedback` A layer where the output consists of the inputs added to a weighted combination of the inputs.
 
+### Neuroscience Model Layers
+* `GQM` Generalized Quadratic Model outputs 1 linear component and a specified number of quadratic components
+* `RustSTC` Outputs an excitatory and inhibitory component according to the Rust-STC model, with a specified number of quadratic components
+* `NakaRuston` Takes an excitatory and inhibitory component and applies Naka-Rushton nonlinearity
+
 ### Optimizer with Gradient Accumulation
 * `NadamAccum` Nadam optimizer which can accumulate gradients across minibatches before updating model parameters.
 
