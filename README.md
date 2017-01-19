@@ -70,7 +70,7 @@ The output from the previous layer has shape (#samples, 12, 10, 13, 13). We can 
 model.add(FilterDims(nb_filters=5, sum_axes=[1], filter_axes=[1], bias=False))
 ```        
 The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions. The output dimensionality is (#samples, 5, 10, 13, 13). We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
-```python
+.```python
 model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
 ``` 
 The output dimensionality is (#samples, 2, 13, 13) since we have collapsed dimensions [1, 2]. We can then use FilterDims to separately spatially filter the output of each spatio-temporal filter with a 2x13x13 tensor:
@@ -99,5 +99,14 @@ We only sum over the last two spatial axes resutling in an output dimensionality
 * `Convolution2DEnergy_Scatter` Convolution operator for filtering a stack of two-dimensional inputs with learned filters inspired by simple-cell and complex-cell V1 neurons. Applies 2D filters separately to each element of the input stack, so the number of feature maps output grows multiplicatively.
 * `Convolution2DEnergy_TemporalBasis` Convolution operator for filtering windows of time varying two-dimensional inputs, such as a series of movie frames, with learned filters inspired by simple-cell and complex-cell V1 neurons. Filters are learned in a factorized representation, consisting of orthogonal 2D filters, a set of vectors that control filter amplitude over time, and a set of scalars that control the trade-off of the orthogonal 2D filters over time. This representation can create a large number of 3D spatio-temporal filters from a small number of parameters, often with less than 1% of the parameters of a naive 3D convolutional model. Useful as the first layer of a network.
 
+### Additional Dense Layers
+* `SoftMinMax` Computes a selective and adaptive soft-min or soft-max over the inputs. Each output can select how it weights the inputs and the strength of the soft-min/max operation which is controlled by a parameter.
+* `DenseNonNeg` A densely-connected NN layer with weights soft-rectified before being applied. Useful for NMF type applications. 
+* `DivisiveNormalization` A layer where the output consists of the inputs divided by a weighted combination of the inputs.
+* `Feedback` A layer where the output consists of the inputs added to a weighted combination of the inputs.
+
 ### Optimizer with Gradient Accumulation
 * `NadamAccum` Nadam optimizer which can accumulate gradients across minibatches before updating model parameters.
+
+### Additional Error Functions
+* `logcosh_error` A cost function for robust regression that behaves like squared error near 0 and absolute error further away, similar to the Huber loss function
