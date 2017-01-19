@@ -448,18 +448,159 @@ class FilterDims(Layer):
 
 
 class SoftMinMax(Layer):
-    '''Computes a selective and adaptive soft-min or soft-max over the inputs.
+    """Computes a selective and adaptive soft-min or soft-max over the inputs.
 
     # Example
 
     ```python
         # as first layer in a sequential model:
-        model = Sequential(Dense(32, input_dim=16))
+        model = Sequential()
+        model.add(SoftMinMax(32, input_dim=16))
         # now the model will take as input arrays of shape (*, 16)
         # and output arrays of shape (*, 32)
 
         # this is equivalent to the above:
-        model = Sequential(Dense(32, input_shape=(16,)))
+        model = Sequential()
+        model.add(SoftMinMax(32, input_shape=(16,)))
+
+        # after the first layer, you don't need to specify
+        # the size of the input anymore:
+        model.add(SoftMinMax(32))
+    ```
+
+    # Arguments
+        output_dim: int > 0.
+        init: name of initialization function for the weights of the layer
+            (see [initializations](../initializations.md)),
+            or alternatively, Theano function to use for weights
+            initialization. This parameter is only relevant
+            if you don't pass a `weights` argument.
+        activation: name of activation function to use
+            (see [activations](../activations.md)),
+            or alternatively, elementwise Theano function.
+            If you don't specify anything, no activation is applied
+            (ie. "linear" activation: a(x) = x).
+        weights: list of Numpy arrays to set as initial weights.
+            The list should have 2 elements, of shape `(input_dim, output_dim)`
+            and (output_dim,) for weights and k parameters respectively.
+        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
+            (eg. L1 or L2 regularization), applied to the main weights matrix.
+        k_regularizer: instance of [WeightRegularizer](../regularizers.md),
+            applied to the k parameters.
+        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
+            applied to the network output.
+        W_constraint: instance of the [constraints](../constraints.md) module
+            (eg. maxnorm, nonneg), applied to the main weights matrix.
+        k_constraint: instance of the [constraints](../constraints.md) module,
+            applied to the k parameters.
+        input_dim: dimensionality of the input (integer). This argument
+            (or alternatively, the keyword argument `input_shape`)
+            is required when using this layer as the first layer in a model.
+
+    # Input shape
+        nD tensor with shape: `(nb_samples, ..., input_dim)`.
+        The most common situation would be
+        a 2D input with shape `(nb_samples, input_dim)`.
+
+    # Output shape
+        nD tensor with shape: `(nb_samples, ..., output_dim)`.
+        For instance, for a 2D input with shape `(nb_samples, input_dim)`,
+        the output would have shape `(nb_samples, output_dim)`.
+    """
+
+    def __init__(self, output_dim, init='glorot_uniform',
+                 activation=None, weights=None,
+                 W_regularizer=None, k_regularizer=None, activity_regularizer=None,
+                 W_constraint=None, k_constraint=None,
+                 input_dim=None, **kwargs):
+        self.init = initializations.get(init)
+        self.activation = activations.get(activation)
+        self.output_dim = output_dim
+        self.input_dim = input_dim
+
+        self.W_regularizer = regularizers.get(W_regularizer)
+        self.k_regularizer = regularizers.get(k_regularizer)
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+
+        self.W_constraint = constraints.get(W_constraint)
+        self.k_constraint = constraints.get(k_constraint)
+
+        self.initial_weights = weights
+        self.input_spec = [InputSpec(ndim='2+')]
+
+        if self.input_dim:
+            kwargs['input_shape'] = (self.input_dim,)
+        super(SoftMinMax, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert len(input_shape) == 2
+        input_dim = input_shape[-1]
+        self.input_dim = input_dim
+        self.input_spec = [InputSpec(dtype=K.floatx(),
+                                     ndim='2+')]
+
+        self.W = self.add_weight((input_dim, self.output_dim),
+                                 initializer=self.init,
+                                 name='{}_W'.format(self.name),
+                                 regularizer=self.W_regularizer,
+                                 constraint=self.W_constraint)
+
+        self.k = self.add_weight((self.output_dim,),
+                                 initializer='zero',
+                                 name='{}_k'.format(self.name),
+                                 regularizer=self.k_regularizer,
+                                 constraint=self.k_constraint)
+
+        if self.initial_weights is not None:
+            self.set_weights(self.initial_weights)
+            del self.initial_weights
+        self.built = True
+
+    def call(self, x, mask=None):
+        W = K.softplus(10.*self.W)/10.
+        kX = self.k[None, None, :] * x[:, :, None]
+        kX = K.clip(kX, -30, 30)
+        wekx = W[None, :, :] * K.exp(kX)
+        output = K.sum(x[:, :, None] * wekx, axis=1) / (K.sum(wekx, axis=1) + 1)
+        return output
+
+    def get_output_shape_for(self, input_shape):
+        assert input_shape and len(input_shape) == 2
+        assert input_shape[-1] and input_shape[-1] == self.input_dim
+        output_shape = list(input_shape)
+        output_shape[-1] = self.output_dim
+        return tuple(output_shape)
+
+    def get_config(self):
+        config = {'output_dim': self.output_dim,
+                  'init': self.init.__name__,
+                  'activation': self.activation.__name__,
+                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
+                  'k_regularizer': self.k_regularizer.get_config() if self.k_regularizer else None,
+                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
+                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+                  'k_constraint': self.k_constraint.get_config() if self.k_constraint else None,
+                  'input_dim': self.input_dim}
+        base_config = super(SoftMinMax, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class DenseNonNeg(Layer):
+    """A densely-connected NN layer with weights soft-rectified before 
+    being applied.
+
+    # Example
+
+    ```python
+        # as first layer in a sequential model:
+        model = Sequential()
+        model.add(Dense(32, input_dim=16))
+        # now the model will take as input arrays of shape (*, 16)
+        # and output arrays of shape (*, 32)
+
+        # this is equivalent to the above:
+        model = Sequential()
+        model.add(Dense(32, input_shape=(16,)))
 
         # after the first layer, you don't need to specify
         # the size of the input anymore:
@@ -478,7 +619,7 @@ class SoftMinMax(Layer):
             or alternatively, elementwise Theano function.
             If you don't specify anything, no activation is applied
             (ie. "linear" activation: a(x) = x).
-        weights: list of numpy arrays to set as initial weights.
+        weights: list of Numpy arrays to set as initial weights.
             The list should have 2 elements, of shape `(input_dim, output_dim)`
             and (output_dim,) for weights and biases respectively.
         W_regularizer: instance of [WeightRegularizer](../regularizers.md)
@@ -491,202 +632,103 @@ class SoftMinMax(Layer):
             (eg. maxnorm, nonneg), applied to the main weights matrix.
         b_constraint: instance of the [constraints](../constraints.md) module,
             applied to the bias.
-        input_dim: dimensionality of the input (integer).
-            This argument (or alternatively, the keyword argument `input_shape`)
+        bias: whether to include a bias
+            (i.e. make the layer affine rather than linear).
+        input_dim: dimensionality of the input (integer). This argument
+            (or alternatively, the keyword argument `input_shape`)
             is required when using this layer as the first layer in a model.
 
     # Input shape
-        2D tensor with shape: `(nb_samples, input_dim)`.
+        nD tensor with shape: `(nb_samples, ..., input_dim)`.
+        The most common situation would be
+        a 2D input with shape `(nb_samples, input_dim)`.
 
     # Output shape
-        2D tensor with shape: `(nb_samples, output_dim)`.
-    '''
-    def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, k_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, k_constraint=None, input_dim=None, **kwargs):
+        nD tensor with shape: `(nb_samples, ..., output_dim)`.
+        For instance, for a 2D input with shape `(nb_samples, input_dim)`,
+        the output would have shape `(nb_samples, output_dim)`.
+    """
+
+    def __init__(self, output_dim, init='glorot_uniform',
+                 activation=None, weights=None,
+                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
+                 W_constraint=None, b_constraint=None,
+                 bias=True, input_dim=None, **kwargs):
         self.init = initializations.get(init)
         self.activation = activations.get(activation)
         self.output_dim = output_dim
         self.input_dim = input_dim
 
         self.W_regularizer = regularizers.get(W_regularizer)
-        self.k_regularizer = regularizers.get(k_regularizer)
+        self.b_regularizer = regularizers.get(b_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
         self.W_constraint = constraints.get(W_constraint)
-        self.k_constraint = constraints.get(k_constraint)
+        self.b_constraint = constraints.get(b_constraint)
 
+        self.bias = bias
         self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=2)]
+        self.input_spec = [InputSpec(ndim='2+')]
 
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
-        super(SoftMinMax, self).__init__(**kwargs)
+        super(DenseNonNeg, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        assert len(input_shape) == 2
-        input_dim = input_shape[1]
+        assert len(input_shape) >= 2
+        input_dim = input_shape[-1]
+        self.input_dim = input_dim
         self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim))]
+                                     ndim='2+')]
 
-        self.W = self.init((input_dim, self.output_dim),
-                           name='{}_W'.format(self.name))
-        self.k = K.zeros((self.output_dim,),
-                         name='{}_k'.format(self.name))
-        self.trainable_weights = [self.W, self.k]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.k_regularizer:
-            self.k_regularizer.set_param(self.k)
-            self.regularizers.append(self.k_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.k_constraint:
-            self.constraints[self.k] = self.k_constraint
+        self.W = self.add_weight((input_dim, self.output_dim),
+                                 initializer=self.init,
+                                 name='{}_W'.format(self.name),
+                                 regularizer=self.W_regularizer,
+                                 constraint=self.W_constraint)
+        if self.bias:
+            self.b = self.add_weight((self.output_dim,),
+                                     initializer='zero',
+                                     name='{}_b'.format(self.name),
+                                     regularizer=self.b_regularizer,
+                                     constraint=self.b_constraint)
+        else:
+            self.b = None
 
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
+        self.built = True
 
     def call(self, x, mask=None):
         W = K.softplus(10.*self.W)/10.
-        kX = self.k[None, None, :] * x[:, :, None]
-        kX = K.clip(kX, -30, 30)
-        wekx = W[None, :, :] * K.exp(kX)
-        output = ((x[:, :, None] * wekx).sum(axis=1) / (wekx.sum(axis=1) + 1))
-        return output
+        b = K.softplus(10.*self.b)/10.
+
+        output = K.dot(x, W)
+        if self.bias:
+            output += b
+        return self.activation(output)
 
     def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 2
-        return (input_shape[0], self.output_dim)
+        assert input_shape and len(input_shape) >= 2
+        assert input_shape[-1] and input_shape[-1] == self.input_dim
+        output_shape = list(input_shape)
+        output_shape[-1] = self.output_dim
+        return tuple(output_shape)
 
     def get_config(self):
         config = {'output_dim': self.output_dim,
                   'init': self.init.__name__,
                   'activation': self.activation.__name__,
                   'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'k_regularizer': self.k_regularizer.get_config() if self.k_regularizer else None,
+                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
                   'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'k_constraint': self.k_constraint.get_config() if self.k_constraint else None,
-                  'input_dim': self.input_dim}
-        base_config = super(SoftMinMax, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-class DenseNonNeg(Layer):
-    '''Just your regular fully connected NN layer.
-
-    # Input shape
-        2D tensor with shape: `(nb_samples, input_dim)`.
-
-    # Output shape
-        2D tensor with shape: `(nb_samples, output_dim)`.
-
-    # Arguments
-        output_dim: int > 0.
-        init: name of initialization function for the weights of the layer
-            (see [initializations](../initializations.md)),
-            or alternatively, Theano function to use for weights
-            initialization. This parameter is only relevant
-            if you don't pass a `weights` argument.
-        activation: name of activation function to use
-            (see [activations](../activations.md)),
-            or alternatively, elementwise Theano function.
-            If you don't specify anything, no activation is applied
-            (ie. "linear" activation: a(x) = x).
-        weights: list of numpy arrays to set as initial weights.
-            The list should have 2 elements, of shape `(input_dim, output_dim)`
-            and (output_dim,) for weights and biases respectively.
-        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
-            applied to the network output.
-        W_constraint: instance of the [constraints](../constraints.md) module
-            (eg. maxnorm, nonneg), applied to the main weights matrix.
-        b_constraint: instance of the [constraints](../constraints.md) module,
-            applied to the bias.
-        input_dim: dimensionality of the input (integer).
-            This argument (or alternatively, the keyword argument `input_shape`)
-            is required when using this layer as the first layer in a model.
-    '''
-    input_ndim = 2
-
-    def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, input_dim=None, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.output_dim = output_dim
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-        self.constraints = [self.W_constraint]
-
-        self.initial_weights = weights
-
-        self.input_dim = input_dim
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(DenseNonNeg, self).__init__(**kwargs)
-
-    def build(self):
-        input_dim = self.input_shape[1]
-
-        self.W = self.init((input_dim, self.output_dim),
-                           name='{}_W'.format(self.name))
-
-        self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    @property
-    def output_shape(self):
-        return (self.input_shape[0], self.output_dim)
-
-    def get_output(self, train=False):
-        X = self.get_input(train)
-        W = K.softplus(10.*self.W)/10.
-        output = self.activation(K.dot(X, W))
-        return output
-
-    def get_config(self):
-        config = {'name': self.__class__.__name__,
-                  'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
+                  'bias': self.bias,
                   'input_dim': self.input_dim}
         base_config = super(DenseNonNeg, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
 
 
 class DenseEnergy(Layer):
