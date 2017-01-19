@@ -36,8 +36,8 @@ model.add(TimeDistributed(Dense(output_dim=64), input_shape=(delays, 100,)))
 model.add(Flatten())
 model.add(Dense(output_dim=64))
 model.add(Activation("relu"))
- This model.add(Dense(output_dim=1))
-*model.add(Activation("relu"))
+model.add(Dense(output_dim=1))
+model.add(Activation("relu"))
 ```
 
 Once your model is complete, it can be compiled and fit:
@@ -66,14 +66,17 @@ model = Sequential()
 model.add(TimeDistributed(Convolution2D(10, 5, 5, activation='linear', subsample=(2, 2)), input_shape=(12, 3, 30, 30)))
 ```
 The output from the previous layer has shape (#samples, 12, 10, 13, 13). We can use FilterDims to filter the 12 time steps on axis 1 by projeciton onto a new axis of 5 dimensions with a 12x5 matrix:
+
 ```python
 model.add(FilterDims(nb_filters=5, sum_axes=[1], filter_axes=[1], bias=False))
 ```        
 The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions. The output dimensionality is (#samples, 5, 10, 13, 13). We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
-.```python
+
+```python
 model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
 ``` 
 The output dimensionality is (#samples, 2, 13, 13) since we have collapsed dimensions [1, 2]. We can then use FilterDims to separately spatially filter the output of each spatio-temporal filter with a 2x13x13 tensor:
+
 ```python
 model.add(FilterDims(nb_filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
 ```
