@@ -237,7 +237,9 @@ class Convolution2DEnergy_TemporalBasis(Layer):
                              dim_ordering=self.dim_ordering,
                              filter_shape=self.W_shape)
 
-        conv_out1 = K.reshape(conv_out1, (xshape[0], xshape[1], conv_out1.shape[1], conv_out1.shape[2], conv_out1.shape[3]))
+        conv_out1_shape = K.shape(conv_out1)
+
+        conv_out1 = K.reshape(conv_out1, (xshape[0], xshape[1], conv_out1_shape[1], conv_out1_shape[2], conv_out1_shape[3]))
 
         if self.dim_ordering == 'th':
             # samps x delays x stack x X x Y
