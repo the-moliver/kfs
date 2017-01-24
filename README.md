@@ -44,7 +44,7 @@ Once your model is complete, it can be compiled and fit:
 ```python
 from keras.optimizers import SGD
 model.compile(loss='poisson', optimizer=SGD(lr=0.0001, momentum=0.5, nesterov=True))
-model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100)
+model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100
 ```
 
 Once fit you can test the model by predicting on held out data. Set `shuffle` to `False` so the samples are generated in the correct order:
@@ -75,7 +75,7 @@ The weights learned by `FilterDims` are a set of temporal filters on the output 
 ```python
 model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
 ``` 
-The output dimensionality is (#samples, 2, 13, 13) since we have collapsed dimensions [1, 2]. We can then use `FilterDims` to separately spatially filter the output of each spatio-temporal filter with a 2x13x13 tensor:
+hThe output dimensionality is (#samples, 2, 13, 13) since we have collapsed dimensions [1, 2]. We can then use `FilterDims` to separately spatially filter the output of each spatio-temporal filter with a 2x13x13 tensor:
 
 ```python
 model.add(FilterDims(nb_filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
@@ -108,8 +108,13 @@ We only sum over the last two spatial axes resutling in an output dimensionality
 * `DivisiveNormalization` A layer where the output consists of the inputs divided by a weighted combination of the inputs.
 * `Feedback` A layer where the output consists of the inputs added to a weighted combination of the inputs.
 
+### Neuroscience Model Layers
+* `GQM` Generalized Quadratic Model outputs 1 linear component and a specified number of quadratic components
+* `RustSTC` Outputs an excitatory and inhibitory component according to the Rust-STC model, with a specified number of quadratic components
+* `NakaRushton` Takes an excitatory and inhibitory component and applies Naka-Rushton nonlinearity
+
 ### Optimizer with Gradient Accumulation
 * `NadamAccum` Nadam optimizer which can accumulate gradients across minibatches before updating model parameters.
 
 ### Additional Error Functions
-* `logcosh_error` A cost function for robust regression that behaves like squared error near 0 and absolute error further away, similar to the Huber loss function
+* `logcosh_error` A cost function for robust regression that behaves like squared error near 0 and absolute error further away, similar to the Huber loss function.
