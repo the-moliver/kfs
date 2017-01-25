@@ -44,7 +44,7 @@ Once your model is complete, it can be compiled and fit:
 ```python
 from keras.optimizers import SGD
 model.compile(loss='poisson', optimizer=SGD(lr=0.0001, momentum=0.5, nesterov=True))
-model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100
+model.fit_generator(train_gen, samples_per_epoch=X_train.shape[0], nb_epoch=100)
 ```
 
 Once fit you can test the model by predicting on held out data. Set `shuffle` to `False` so the samples are generated in the correct order:
