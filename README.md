@@ -99,7 +99,7 @@ We only sum over the last two spatial axes resutling in an output dimensionality
 
 ### Convolutional Energy Layers
 * `Convolution2DEnergy` Convolution operator for filtering inputs with learned filters inspired by simple-cell and complex-cell V1 neurons.
-* `Convolution2DEnergy_Scatter` Convolution operator for filtering a stack of two-dimensional inputs with learned filters inspired by simple-cell and complex-cell V1 neurons. Applies 2D filters separately to each element of the input stack, so the number of feature maps output grows multiplicatively.
+* `Convolution2DEnergy_Scatter` Convolution operator for filtering a stack of two-dimensional inputs with learned filters inspired by simple-cell and complex-cell V1 neurons. Applies 2D filters separately to each element of the input stack, so the number of feature maps output grows multiplicatively. Similar in spirit to the [`scattering transform`](http://www.di.ens.fr/data/scattering/).
 * `Convolution2DEnergy_TemporalBasis` Convolution operator for filtering windows of time varying two-dimensional inputs, such as a series of movie frames, with learned filters inspired by simple-cell and complex-cell V1 neurons. Filters are learned in a factorized representation, consisting of orthogonal 2D filters, a set of vectors that control filter amplitude over time, and a set of scalars that control the trade-off of the orthogonal 2D filters over time. This representation can create a large number of 3D spatio-temporal filters from a small number of parameters, often with less than 1% of the parameters of a naive 3D convolutional model. Useful as the first layer of a network.
 
 ### Additional Dense Layers
