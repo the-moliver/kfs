@@ -362,7 +362,7 @@ class FilterDims(Layer):
             W = K.permute_dimensions(W, ax1)
             W = K.reshape(W, (-1, self.nb_filters))
             x = K.permute_dimensions(x, ax2)
-            x = K.reshape(x, (-1, W.shape[0]))
+            x = K.reshape(x, (-1, K.shape(W)[0]))
             output = K.reshape(K.dot(x, W), outdims)
             if self.bias:
                 b_broadcast = [i for j, i in enumerate(self.b_broadcast) if j not in self.sum_axes]

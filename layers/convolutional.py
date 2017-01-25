@@ -138,7 +138,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.b_regularizer = regularizers.get(b_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.W_constraint = constraints.UnitNormOrthogonal(self.nb_filter_complex+self.nb_filter_simple)
+        self.W_constraint = constraints.UnitNormOrthogonal(self.nb_filter_complex+self.nb_filter_simple, dim_ordering)
         self.Wt_constraint = constraints.get(Wt_constraint)
         self.Ws_constraint = constraints.get(Ws_constraint)
         self.b_constraint = constraints.get(b_constraint)

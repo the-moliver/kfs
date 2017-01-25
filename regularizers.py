@@ -146,8 +146,7 @@ class TVRegularizer(Regularizer):
 
 
 def laplacian1d(X):
-    # Xout = K.zeros(X.shape.eval())
-    Xout = K.variable(K.zeros_like(X))
+    Xout = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout = T.set_subtensor(Xout[1:-1], X[2:] + X[:-2])
         Xout = T.set_subtensor(Xout[0], X[1] + X[0])
@@ -160,8 +159,7 @@ def laplacian1d(X):
 
 
 def diffc(X):
-    # Xout = K.zeros(X.shape.eval())
-    Xout = K.variable(K.zeros_like(X))
+    Xout = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout = T.set_subtensor(Xout[:, 1:-1], X[:, 2:] - X[:, :-2])
         Xout = T.set_subtensor(Xout[:, 0], X[:, 1] - X[:, 0])
@@ -174,8 +172,7 @@ def diffc(X):
 
 
 def diffr(X):
-    # Xout = K.zeros(X.shape.eval())
-    Xout = K.variable(K.zeros_like(X))
+    Xout = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout = T.set_subtensor(Xout[1:-1, :], X[2:, :] - X[:-2, :])
         Xout = T.set_subtensor(Xout[0, :], X[1, :] - X[0, :])
@@ -188,8 +185,7 @@ def diffr(X):
 
 
 def diffcc(X):
-    # Xout = K.zeros(X.shape.eval())
-    Xout = K.variable(K.zeros_like(X))
+    Xout = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout = T.set_subtensor(Xout[:, 1:-1], X[:, 2:] + X[:, :-2])
         Xout = T.set_subtensor(Xout[:, 0], X[:, 1] + X[:, 0])
@@ -202,8 +198,7 @@ def diffcc(X):
 
 
 def diffrr(X):
-    # Xout = K.zeros(X.shape.eval())
-    Xout = K.variable(K.zeros_like(X))
+    Xout = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout = T.set_subtensor(Xout[1:-1, :], X[2:, :] + X[:-2, :])
         Xout = T.set_subtensor(Xout[0, :], X[1, :] + X[0, :])
@@ -216,10 +211,8 @@ def diffrr(X):
 
 
 def diffrc(X):
-    # Xout1 = K.zeros(X.shape.eval())
-    Xout1 = K.variable(K.zeros_like(X))
-    # Xout2 = K.zeros(X.shape.eval())
-    Xout2 = K.variable(K.zeros_like(X))
+    Xout1 = K.zeros(K.eval(K.shape(X)))
+    Xout2 = K.zeros(K.eval(K.shape(X)))
     if K.backend() == 'theano':
         Xout1 = T.set_subtensor(Xout1[1:-1, 1:-1], X[2:, 2:]+X[:-2, :-2])
         Xout1 = T.set_subtensor(Xout1[0, 0], X[1, 1]+X[0, 0])
