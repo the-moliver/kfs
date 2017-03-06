@@ -5,7 +5,7 @@ from __future__ import division
 import functools
 
 from keras import backend as K
-from keras import activations, initializations, regularizers, constraints
+from keras import activations, initializers, regularizers, constraints
 from keras.engine import InputSpec, Layer
 
 

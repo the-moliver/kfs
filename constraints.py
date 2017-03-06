@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from keras import backend as K
 from keras.constraints import Constraint
 import numpy as np
+import six
 if K.backend() == 'theano':
     from theano import tensor as T
 
@@ -71,7 +72,16 @@ class Stochastic(Constraint):
                 'axis': self.axis}
 
 
-from keras.utils.generic_utils import get_from_module
-def get(identifier, kwargs=None):
-    return get_from_module(identifier, globals(), 'constraint',
-                           instantiate=True, kwargs=kwargs)
+def get(identifier):
+    if identifier is None:
+        return None
+    if isinstance(identifier, dict):
+        return deserialize(identifier)
+    elif isinstance(identifier, six.string_types):
+        config = {'class_name': str(identifier), 'config': {}}
+        return deserialize(config)
+    elif callable(identifier):
+        return identifier
+    else:
+        raise ValueError('Could not interpret constraint identifier:',
+                         identifier)
