@@ -85,3 +85,12 @@ def get(identifier):
     else:
         raise ValueError('Could not interpret constraint identifier:',
                          identifier)
+
+
+class Symmetric(Constraint):
+    '''Constrain the weight tensor to be symmetric in last 2 dimensions'''
+    def __call__(self, w):
+        axes = range(K.ndim(w))
+        axes = axes[:-2]+axes[-1:]+axes[-2:-1]
+        w = .5*(w + K.permute_dimensions(w, axes))
+        return w
