@@ -2,201 +2,24 @@
 from __future__ import absolute_import
 from __future__ import division
 
-import functools
+import numpy as np
+
+import copy
+import inspect
+import types as python_types
+import warnings
 
 from keras import backend as K
-from keras import activations, initializers, regularizers, constraints
-from keras.engine import InputSpec, Layer
-
-
-class TemporalFilter(Layer):
-    def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None, input_dim=None, bias=False, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.output_dim = output_dim
-        self.input_dim = input_dim
-        self.bias = bias
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-
-        if self.bias:
-            self.b_regularizer = regularizers.get(b_regularizer)
-            self.b_constraint = constraints.get(b_constraint)
-
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=3)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(TemporalFilter, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 3
-        input_dim = input_shape[1]
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim, input_shape[2]))]
-
-        self.W = self.init((input_dim, self.output_dim),
-                           name='{}_W'.format(self.name))
-        if self.bias:
-            self.b = K.zeros((self.output_dim,),
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
-        else:
-            self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    def call(self, x, mask=None):
-        # Squash samples and timesteps into a single axis
-        x = K.permute_dimensions(x, [0, 2, 1])
-        x = K.reshape(x, (-1, self.input_spec[0].shape[-2]))  # (samples * input_dim, timesteps)
-        output = K.dot(x, self.W)  # (samples * input_dim, output_dim)
-        if self.bias:
-            output += self.b
-        output = K.reshape(output, (-1, self.input_spec[0].shape[-1], self.output_dim))  # (samples, input_dim, output_dim)
-        output = K.permute_dimensions(output, [0, 2, 1])  # (samples, output_dim, input_dim)
-        return self.activation(output)
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 3
-        return (input_shape[0], self.output_dim, input_shape[2])
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'input_dim': self.input_dim}
-        base_config = super(TemporalFilter, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-class SpatialFilter(Layer):
-    def __init__(self, output_dim, init='glorot_uniform', activation='linear', weights=None,
-                 W_regularizer=None, b_regularizer=None, activity_regularizer=None, bias=False,
-                 W_constraint=None, b_constraint=None, input_dim=None, **kwargs):
-        self.init = initializations.get(init)
-        self.activation = activations.get(activation)
-        self.output_dim = output_dim
-        self.input_dim = input_dim
-        self.bias = bias
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-
-        if self.bias:
-            self.b_regularizer = regularizers.get(b_regularizer)
-            self.b_constraint = constraints.get(b_constraint)
-
-        self.initial_weights = weights
-        self.input_spec = [InputSpec(ndim=5)]
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(SpatialFilter, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        assert len(input_shape) == 5
-        input_dim1 = input_shape[1]
-        input_dim2 = input_shape[2]
-        input_dim3 = input_shape[3]
-        input_dim4 = input_shape[4]
-
-        self.W = self.init((input_dim3, input_dim4, self.output_dim),
-                           name='{}_W'.format(self.name))
-        if self.bias:
-            self.b = K.zeros((input_dim1, input_dim2, self.output_dim),
-                             name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.b]
-        else:
-            self.trainable_weights = [self.W]
-
-        self.regularizers = []
-        if self.W_regularizer:
-            self.W_regularizer.set_param(self.W)
-            self.regularizers.append(self.W_regularizer)
-
-        if self.bias and self.b_regularizer:
-            self.b_regularizer.set_param(self.b)
-            self.regularizers.append(self.b_regularizer)
-
-        if self.activity_regularizer:
-            self.activity_regularizer.set_layer(self)
-            self.regularizers.append(self.activity_regularizer)
-
-        self.constraints = {}
-        if self.W_constraint:
-            self.constraints[self.W] = self.W_constraint
-        if self.bias and self.b_constraint:
-            self.constraints[self.b] = self.b_constraint
-
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
-
-    def call(self, x, mask=None):
-        samps = x.shape[0]
-        maxlen = x.shape[1]
-        stack_size = x.shape[2]
-        dim1 = x.shape[3]
-        dim2 = x.shape[4]
-
-        x = K.reshape(x, (samps*maxlen*stack_size, dim1*dim2))
-        W = K.reshape(self.W, (dim1*dim2, self.output_dim))
-        output = K.reshape(K.dot(x, W), (samps, maxlen, stack_size, self.output_dim))
-        if self.bias:
-            output += self.b
-        return self.activation(output)
-
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 5
-        return (input_shape[0], input_shape[1], input_shape[2], self.output_dim)
-
-    def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'input_dim': self.input_dim}
-        base_config = super(SpatialFilter, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+from keras import activations 
+from keras import initializers
+from keras import regularizers
+from keras import constraints
+from keras.engine import InputSpec
+from keras.engine import Layer
+from keras.utils.generic_utils import func_dump
+from keras.utils.generic_utils import func_load
+from keras.utils.generic_utils import deserialize_keras_object
+from keras.legacy import interfaces
 
 
 class FilterDims(Layer):
@@ -216,25 +39,25 @@ class FilterDims(Layer):
         # The output from the previous layer has shape (#samples, 12, 10, 13, 13)
         # We can use FilterDims to filter the 12 time steps on axis 1 by projeciton onto a new axis of 5 dimensions with a 12x5 matrix:
 
-        model.add(FilterDims(nb_filters=5, sum_axes=[1], filter_axes=[1], bias=False))
+        model.add(FilterDims(filters=5, sum_axes=[1], filter_axes=[1], bias=False))
 
         # The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions
         # The output dimensionality is (#samples, 5, 10, 13, 13)
         # We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map
         # dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
 
-        model.add(FilterDims(nb_filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
+        model.add(FilterDims(filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
 
         # The output dimensionality is (#samples, 2, 13, 13)
         # We can then use FilterDims to spatially filter each spatio-temporal dimension with a 2x13x13 tensor:
 
-        model.add(FilterDims(nb_filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
+        model.add(FilterDims(filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
 
         # We only sum over the last two spatial axes resutling in an output dimensionality of (#samples, 2)
     ```
 
     # Arguments
-        nb_filters: number of filters to apply.
+        filters: number of filters to apply.
         filter_axes: a list of the axes of the input to filter
         sum_axes: a list of the axes of the input that should be summed across after filtering
         init: name of initialization function for the weights of the layer
@@ -271,80 +94,84 @@ class FilterDims(Layer):
     # Output shape
         ND tensor with shape determined by input and arguments.
     '''
-    def __init__(self, nb_filters, sum_axes, filter_axes, init='glorot_uniform', activation='linear', weight_activation='linear',
-                 weights=None, W_regularizer=None, b_regularizer=None, activity_regularizer=None,
-                 W_constraint=None, b_constraint=None,
-                 bias=True, input_dim=None, **kwargs):
-        self.init = initializations.get(init)
+    def __init__(self, filters,
+                 sum_axes,
+                 filter_axes,
+                 activation=None,
+                 use_bias=True,
+                 kernel_initializer='glorot_uniform',
+                 bias_initializer='zeros',
+                 kernel_activation=None,
+                 kernel_regularizer=None,
+                 bias_regularizer=None,
+                 activity_regularizer=None,
+                 kernel_constraint=None,
+                 bias_constraint=None,
+                 **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+        super(FilterDims, self).__init__(**kwargs)
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.bias_initializer = initializers.get(bias_initializer)
         self.activation = activations.get(activation)
-        self.weight_activation = activations.get(weight_activation)
-        self.nb_filters = nb_filters
+        self.kernel_activation = activations.get(kernel_activation)
+        self.filters = filters
         self.sum_axes = list(sum_axes)
         self.sum_axes.sort()
         self.filter_axes = list(filter_axes)
         self.filter_axes.sort()
-        self.input_dim = input_dim
-
-        self.W_regularizer = regularizers.get(W_regularizer)
-        self.b_regularizer = regularizers.get(b_regularizer)
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.bias_regularizer = regularizers.get(bias_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
-
-        self.W_constraint = constraints.get(W_constraint)
-        self.b_constraint = constraints.get(b_constraint)
-
-        self.bias = bias
-        self.initial_weights = weights
-
-        if self.input_dim:
-            kwargs['input_shape'] = (self.input_dim,)
-        super(FilterDims, self).__init__(**kwargs)
+        self.kernel_constraint = constraints.get(kernel_constraint)
+        self.bias_constraint = constraints.get(bias_constraint)
+        self.use_bias = use_bias
+        self.input_spec = InputSpec(min_ndim=2)
+        self.supports_masking = True
 
     def build(self, input_shape):
-        self.input_spec = [InputSpec(shape=input_shape)]
         ndim = len(input_shape)
+        assert len(ndim) >= 2
 
-        w_shape = [1] * (ndim - 1)
-        W_broadcast = [False] * (ndim - 1)
-        b_broadcast = [True] * (ndim - 1)
+        kernel_shape = [1] * (ndim - 1)
+        kernel_broadcast = [False] * (ndim - 1)
+        bias_broadcast = [True] * (ndim - 1)
         for i in self.filter_axes:
-            w_shape[i-1] = input_shape[i]
+            kernel_shape[i-1] = input_shape[i]
 
-        if self.nb_filters > 1:
-            w_shape.append(self.nb_filters)
-            W_broadcast.append(False)
-            b_broadcast.append(False)
+        if self.filters > 1:
+            kernel_shape.append(self.filters)
+            kernel_broadcast.append(False)
+            bias_broadcast.append(False)
 
         for i in set(range(1, ndim)) - set(self.filter_axes):
-            W_broadcast[i-1] = True
+            kernel_broadcast[i-1] = True
 
-        self.W = self.add_weight(w_shape,
-                                 initializer=self.init,
-                                 name='{}_W'.format(self.name),
-                                 regularizer=self.W_regularizer,
-                                 constraint=self.W_constraint)
+        self.kernel = self.add_weight(kernel_shape,
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
 
         if self.bias:
-            bias_size = [1] * (ndim - 1)
+            bias_shape = [1] * (ndim - 1)
             for i in set(self.filter_axes) - set(self.sum_axes):
-                bias_size[i-1] = input_shape[i]
-                b_broadcast[i-1] = False
+                bias_shape[i-1] = input_shape[i]
+                bias_broadcast[i-1] = False
 
-            if self.nb_filters > 1:
-                bias_size.append(self.nb_filters)
+            if self.filters > 1:
+                bias_shape.append(self.filters)
 
-            self.b = self.add_weight(bias_size,
-                                     initializer='zero',
-                                     name='{}_b'.format(self.name),
-                                     regularizer=self.b_regularizer,
-                                     constraint=self.b_constraint)
+            self.bias = self.add_weight(bias_shape,
+                                        initializer=self.kernel_initializer,
+                                        name='bias',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
         else:
-            self.b = None
+            self.bias = None
 
-        self.W_broadcast = W_broadcast
-        self.b_broadcast = b_broadcast
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
+        self.kernel_broadcast = kernel_broadcast
+        self.bias_broadcast = bias_broadcast
         self.built = True
 
     def call(self, x, mask=None):
@@ -357,10 +184,10 @@ class FilterDims(Layer):
             ax2 = list(set(range(ndim)) - set(self.sum_axes))
             permute_dims = range(len(ax2))
             permute_dims.insert(self.sum_axes[0], len(ax2))
-            outdims = [-1] + [self.input_spec[0].shape[a] for a in ax2[1:]] + [self.nb_filters]
+            outdims = [-1] + [self.input_spec[0].shape[a] for a in ax2[1:]] + [self.filters]
             ax2 = ax2 + self.sum_axes
             W = K.permute_dimensions(W, ax1)
-            W = K.reshape(W, (-1, self.nb_filters))
+            W = K.reshape(W, (-1, self.filters))
             x = K.permute_dimensions(x, ax2)
             x = K.reshape(x, (-1, K.shape(W)[0]))
             output = K.reshape(K.dot(x, W), outdims)
@@ -375,7 +202,7 @@ class FilterDims(Layer):
                     output += b
             output = K.permute_dimensions(output, permute_dims)
 
-        elif self.nb_filters > 1:
+        elif self.filters > 1:
             # bcast = list(np.where(self.broadcast)[0])
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
@@ -411,14 +238,14 @@ class FilterDims(Layer):
 
         return self.activation(output)
 
-    def get_output_shape_for(self, input_shape):
-        if self.nb_filters > 1:
+    def compute_output_shape(self, input_shape):
+        if self.filters > 1:
             ndim = len(input_shape)
             output_shape = [input_shape[0]] + [1] * (ndim-1)
             for i in set(range(1, ndim)) - set(self.sum_axes):
                 output_shape[i] = input_shape[i]
 
-            output_shape.append(self.nb_filters)
+            output_shape.append(self.filters)
             permute_dims = range(ndim + 1)
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]
@@ -433,16 +260,21 @@ class FilterDims(Layer):
         return tuple(output_shape)
 
     def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'init': self.init.__name__,
-                  'activation': self.activation.__name__,
-                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
-                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
-                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
-                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
-                  'bias': self.bias,
-                  'input_dim': self.input_dim}
+        config = {
+            'filters': self.filters,
+            'sum_axes': self.sum_axes,
+            'filter_axes': self.filter_axes,
+            'activation': activations.serialize(self.activation),
+            'kernel_activation': activations.serialize(self.kernel_activation),
+            'use_bias': self.use_bias,
+            'kernel_initializer': initializers.serialize(self.kernel_initializer),
+            'bias_initializer': initializers.serialize(self.kernel_initializer),
+            'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+            'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+            'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+            'kernel_constraint': constraints.serialize(self.kernel_constraint),
+            'bias_constraint': constraints.serialize(self.bias_constraint)
+        }
         base_config = super(FilterDims, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
