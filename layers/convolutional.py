@@ -149,7 +149,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.bias_regularizer = regularizers.get(bias_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.spatial_kernel_constraint = constraints.UnitNormOrthogonal(self.filters_complex + self.filters_simple)
+        self.spatial_kernel_constraint = None#constraints.UnitNormOrthogonal(self.filters_complex + self.filters_simple)
         self.temporal_kernel_constraint = constraints.get(temporal_kernel_constraint)
         self.temporal_frequencies_constraint = constraints.get(temporal_frequencies_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
@@ -162,14 +162,14 @@ class Convolution2DEnergy_TemporalBasis(Layer):
     def build(self, input_shape):
         assert len(input_shape) == 5
         if self.data_format == 'channels_first':
-            channel_axis = 1
+            channel_axis = 2
         else:
             channel_axis = -1
         if input_shape[channel_axis] is None:
             raise ValueError('The channel dimension of the inputs '
                              'should be defined. Found `None`.')
 
-        delays = input_shape[1]
+        self.delays = input_shape[1]
         input_dim = input_shape[channel_axis]
         spatial_kernel_shape = self.spatial_kernel_size + (input_dim, 2*self.filters_complex + 2*self.filters_simple)
 
@@ -179,7 +179,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
                                               regularizer=self.spatial_kernel_regularizer,
                                               constraint=self.spatial_kernel_constraint)
 
-        self.temporal_kernel = self.add_weight((delays, self.filters_temporal),
+        self.temporal_kernel = self.add_weight((self.delays, self.filters_temporal),
                                                initializer=self.temporal_kernel_initializer,
                                                name='temporal_kernel',
                                                regularizer=self.temporal_kernel_regularizer,
@@ -200,7 +200,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
                                               regularizer=self.temporal_frequencies_regularizer,
                                               constraint=self.temporal_frequencies_constraint)
 
-        self.delays_pi = K.variable(2 * np.pi * np.arange(0, 1 + 1. / (delays - 1), 1. / (delays - 1)), name='delays_pi')
+        self.delays_pi = K.variable(2 * np.pi * np.arange(0, 1 + 1. / (self.delays - 1), 1. / (self.delays - 1)), name='delays_pi')
 
         # Set input spec.
         self.input_spec = InputSpec(ndim=5,
@@ -255,7 +255,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
 
         conv_out1_shape = K.shape(conv_out1)
 
-        conv_out1 = K.reshape(conv_out1, (xshape[0], xshape[1], conv_out1_shape[1], conv_out1_shape[2], conv_out1_shape[3]))
+        conv_out1 = K.reshape(conv_out1, (-1, self.delays, conv_out1_shape[1], conv_out1_shape[2], conv_out1_shape[3]))
 
         if self.data_format == 'channels_first':
             # samps x delays x stack x X x Y
@@ -363,7 +363,7 @@ class Convolution2DEnergy_Scatter(Layer):
         self.bias_regularizer = regularizers.get(bias_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.kernel_constraint = constraints.UnitNormOrthogonal(filters_complex)
+        self.kernel_constraint = None#constraints.UnitNormOrthogonal(filters_complex)
         self.bias_constraint = constraints.get(bias_constraint)
 
         self.use_bias = use_bias
@@ -432,9 +432,9 @@ class Convolution2DEnergy_Scatter(Layer):
             raise Exception('Invalid data_format: ' + self.data_format)
 
     def call(self, x, mask=None):
-        input_shape = K.shape(x)
-        output_shape = [-1] + list(self.compute_output_shape(input_shape)[1:])
         xshape = K.shape(x)
+        output_shape = [-1] + list(self.compute_output_shape(xshape)[1:])
+
         if self.data_format == 'channels_first':
             x = K.reshape(x, (-1, 1, xshape[2], xshape[3]))
         elif self.data_format == 'channels_last':
@@ -463,8 +463,8 @@ class Convolution2DEnergy_Scatter(Layer):
                 conv_out2 += K.reshape(self.bias, (1, self.filters_complex + self.filters_simple, 1, 1))
             elif self.data_format == 'channels_last':
                 conv_out2 += K.reshape(self.bias, (1, 1, 1, self.filters_complex + self.filters_simple))
-                conv_out2 = K.reshape(conv_out2, [-1, xshape[3], output_shape[1], output_shape[2], self.filters_complex + self.filters_simple])
-                conv_out2 = K.permute_dimensions(conv_out2, (0, 2, 3, 1, 4))
+                # conv_out2 = K.reshape(conv_out2, [-1, xshape[3], output_shape[1], output_shape[2], self.filters_complex + self.filters_simple])
+                # conv_out2 = K.permute_dimensions(conv_out2, (0, 2, 3, 1, 4))
 
         conv_out2 = self.activation(conv_out2)
 
