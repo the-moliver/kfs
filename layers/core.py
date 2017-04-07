@@ -131,7 +131,7 @@ class FilterDims(Layer):
 
     def build(self, input_shape):
         ndim = len(input_shape)
-        assert len(ndim) >= 2
+        assert ndim >= 2
 
         kernel_shape = [1] * (ndim - 1)
         kernel_broadcast = [False] * (ndim - 1)
@@ -147,13 +147,14 @@ class FilterDims(Layer):
         for i in set(range(1, ndim)) - set(self.filter_axes):
             kernel_broadcast[i-1] = True
 
+        kernel_shape = tuple(kernel_shape)
         self.kernel = self.add_weight(kernel_shape,
                                       initializer=self.kernel_initializer,
                                       name='kernel',
                                       regularizer=self.kernel_regularizer,
                                       constraint=self.kernel_constraint)
 
-        if self.bias:
+        if self.use_bias:
             bias_shape = [1] * (ndim - 1)
             for i in set(self.filter_axes) - set(self.sum_axes):
                 bias_shape[i-1] = input_shape[i]
@@ -162,6 +163,7 @@ class FilterDims(Layer):
             if self.filters > 1:
                 bias_shape.append(self.filters)
 
+            bias_shape = tuple(bias_shape)
             self.bias = self.add_weight(bias_shape,
                                         initializer=self.kernel_initializer,
                                         name='bias',
@@ -175,8 +177,9 @@ class FilterDims(Layer):
         self.built = True
 
     def call(self, x, mask=None):
-        ndim = len(self.input_spec[0].shape)
-        W = self.weight_activation(self.W)
+        ndim = K.ndim(x)
+        xshape = K.shape(x)
+        W = self.kernel_activation(self.kernel)
 
         if self.filter_axes == self.sum_axes:
             ax1 = [a-1 for a in self.sum_axes]
@@ -184,16 +187,16 @@ class FilterDims(Layer):
             ax2 = list(set(range(ndim)) - set(self.sum_axes))
             permute_dims = range(len(ax2))
             permute_dims.insert(self.sum_axes[0], len(ax2))
-            outdims = [-1] + [self.input_spec[0].shape[a] for a in ax2[1:]] + [self.filters]
+            outdims = [-1] + [xshape[a] for a in ax2[1:]] + [self.filters]
             ax2 = ax2 + self.sum_axes
             W = K.permute_dimensions(W, ax1)
             W = K.reshape(W, (-1, self.filters))
             x = K.permute_dimensions(x, ax2)
             x = K.reshape(x, (-1, K.shape(W)[0]))
             output = K.reshape(K.dot(x, W), outdims)
-            if self.bias:
-                b_broadcast = [i for j, i in enumerate(self.b_broadcast) if j not in self.sum_axes]
-                b = K.squeeze(self.b, self.sum_axes[0])
+            if self.use_bias:
+                b_broadcast = [i for j, i in enumerate(self.bias_broadcast) if j not in self.sum_axes]
+                b = K.squeeze(self.bias, self.sum_axes[0])
                 if len(self.sum_axes) > 1:
                     b = K.squeeze(b, self.sum_axes[1] - 1)
                 if K.backend() == 'theano':
@@ -209,29 +212,29 @@ class FilterDims(Layer):
             permute_dims[ndim] = self.sum_axes[0]
 
             if K.backend() == 'theano':
-                output = K.sum(x[..., None] * K.pattern_broadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+                output = K.sum(x[..., None] * K.pattern_broadcast(W, self.kernel_broadcast), axis=self.sum_axes, keepdims=True)
             else:
                 output = K.sum(x[..., None] * W, axis=self.sum_axes, keepdims=True)
 
-            if self.bias:
+            if self.use_bias:
                 if K.backend() == 'theano':
-                    output += K.pattern_broadcast(self.b, self.b_broadcast)
+                    output += K.pattern_broadcast(self.bias, self.bias_broadcast)
                 else:
-                    output += self.b
+                    output += self.bias
             output = K.squeeze(K.permute_dimensions(output, permute_dims), ndim)
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1])
 
         else:
             if K.backend() == 'theano':
-                output = K.sum(x * K.pattern_broadcast(W, self.W_broadcast), axis=self.sum_axes, keepdims=True)
+                output = K.sum(x * K.pattern_broadcast(W, self.kernel_broadcast), axis=self.sum_axes, keepdims=True)
             else:
                 output = K.sum(x * W, axis=self.sum_axes, keepdims=True)
-            if self.bias:
+            if self.use_bias:
                 if K.backend() == 'theano':
-                    output += K.pattern_broadcast(self.b, self.b_broadcast)
+                    output += K.pattern_broadcast(self.bias, self.bias_broadcast)
                 else:
-                    output += self.b
+                    output += self.bias
             output = K.squeeze(output, self.sum_axes[0])
             if len(self.sum_axes) > 1:
                 output = K.squeeze(output, self.sum_axes[1]-1)

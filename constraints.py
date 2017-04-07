@@ -3,8 +3,8 @@ from keras import backend as K
 from keras.constraints import Constraint
 import numpy as np
 import six
-if K.backend() == 'theano':
-    from theano import tensor as T
+# if K.backend() == 'theano':
+#     from theano import tensor as T
 
 
 class UnitNormOrthogonal(Constraint):
@@ -13,18 +13,17 @@ class UnitNormOrthogonal(Constraint):
     # Arguments
         m: Int; The number of pairs to be made orthogonal. Anything beyond the
                 specified pairs be made unit norm, but is assumed unpaired
-        dim_ordering: {'th' or 'tf'} determines whether the pairs on on the
-                      first or last axes
+
     '''
-    def __init__(self, m, dim_ordering=None):
+    def __init__(self, m):
         self.m = m
-        self.dim_ordering = dim_ordering
+        # self.data_format = data_format
 
     def __call__(self, p):
-        if self.dim_ordering == 'tf':
-            rotate_axis = range(K.ndim(p))
-            rotate_axis = [rotate_axis[-1]] + rotate_axis[:-1]
-            p = K.permute_dimensions(p, rotate_axis)
+        # if self.data_format == 'channels_last':
+        rotate_axis = range(K.ndim(p))
+        rotate_axis = [rotate_axis[-1]] + rotate_axis[:-1]
+        p = K.permute_dimensions(p, rotate_axis)
 
         sumaxes = tuple(range(1, K.ndim(p)))
 
@@ -43,10 +42,10 @@ class UnitNormOrthogonal(Constraint):
 
         out = K.concatenate((v, v2, x), axis=0)
 
-        if self.dim_ordering == 'tf':
-            rotate_axis = range(K.ndim(out))
-            rotate_axis = rotate_axis[1:] + [rotate_axis[0]]
-            out = K.permute_dimensions(out, rotate_axis)
+        # if self.dim_ordering == 'tf':
+        rotate_axis = range(K.ndim(out))
+        rotate_axis = rotate_axis[1:] + [rotate_axis[0]]
+        out = K.permute_dimensions(out, rotate_axis)
         return out
 
     def get_config(self):

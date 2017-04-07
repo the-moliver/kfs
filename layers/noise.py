@@ -70,9 +70,9 @@ class AxesDropout(Dropout):
 
     def _get_noise_shape(self, inputs):
         input_shape = K.shape(inputs)
-        noise_shape = [1]*len(inputs)
+        noise_shape = [1]*K.ndim(inputs)
         for i in self.axes:
-            input_shape[i] = input_shape[i]
+            noise_shape[i] = input_shape[i]
         return noise_shape
 
 

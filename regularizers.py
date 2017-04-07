@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 from keras import backend as K
-from keras.regularizers import Regularizer
+from keras.regularizers import Regularizer, serialize, deserialize, get
 import numpy as np
 
 if K.backend() == 'theano':
@@ -251,8 +251,3 @@ def diffrc(X):
         Xout2[-1, 0].assign(X[-2, 1]+X[-1, 0])
         Xout2[1:-1, 0].assign(X[:-2, 1]+X[2:, 0])
     return (Xout1 - Xout2)/4
-
-
-from keras.utils.generic_utils import get_from_module
-def get(identifier, kwargs=None):
-    return get_from_module(identifier, globals(), 'regularizer', instantiate=True, kwargs=kwargs)
