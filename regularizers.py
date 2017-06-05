@@ -47,6 +47,44 @@ class XCovRegularizer(Regularizer):
                 "division_idx": self.division_idx}
 
 
+class LocalOrthoRegularizer(Regularizer):
+    """Locally constrained decorrelation regularizier
+
+    # Arguments
+        gamma: Float; regularization factor.
+        lam: Float; controls angle-of-influence.
+        axis: Int; Axis along which to compute cross-covariance
+
+    # References
+        - [REGULARIZING CNNS WITH LOCALLY CONSTRAINED DECORRELATIONS. Pau Rodriguez et al, 2017](https://openreview.net/pdf?id=ByOvsIqeg)
+    """
+    def __init__(self, gamma=1., lam=10., axis='last'):
+        self.gamma = K.cast_to_floatx(gamma)
+        self.lam = K.cast_to_floatx(lam)
+        self.axis = axis
+
+    def set_layer(self, layer):
+        self.layer = layer
+
+    def __call__(self, x):
+        xshape = K.int_shape(x)
+        if self.axis is 'last':
+            x = K.reshape(x, (-1, xshape[-1]))
+            x /= K.sqrt(K.sum(K.square(x), axis=0, keepdims=True))
+            xx = K.dot(K.transpose(x), x)
+            return self.gamma * K.sum(K.log(1.0 + K.exp(self.lam * (xx - 1.0))) * (1.0 - K.eye(xshape[-1])))
+        elif self.axis is 'first':
+            x = K.reshape(x, (xshape[0], -1))
+            x /= K.sqrt(K.sum(K.square(x), axis=1, keepdims=True))
+            xx = K.dot(x, K.transpose(x))
+            return self.gamma * K.sum(K.log(1.0 + K.exp(self.lam * (xx - 1.0))) * (1.0 - K.eye(xshape[0])))
+
+    def get_config(self):
+        return {"name": self.__class__.__name__,
+                "gamma": float(self.gamma),
+                "lam": float(self.lam)}
+
+
 class StochasticWeightRegularizer(Regularizer):
     """Regularizer for enforcing weight matrix to be a stochastic
     matrix, i.e. sums to 1 along a specified axis. Useful for

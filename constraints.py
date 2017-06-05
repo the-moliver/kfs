@@ -49,8 +49,7 @@ class UnitNormOrthogonal(Constraint):
         return out
 
     def get_config(self):
-        return {'name': self.__class__.__name__,
-                'm': self.m}
+        return {'m': self.m}
 
 
 class Stochastic(Constraint):

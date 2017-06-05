@@ -5,6 +5,7 @@ import functools
 from keras import backend as K
 from keras import activations, initializers, regularizers
 from kfs import constraints
+from keras import constraints as kconstraints
 from keras.engine import Layer, InputSpec
 from keras.layers import Conv2D
 from keras.utils import conv_utils
@@ -108,6 +109,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
                  temporal_kernel_initializer='glorot_uniform',
                  temporal_frequencies_initializer=step_init,
                  temporal_frequencies_initial_max=2,
+                 temporal_frequencies_scaling=10,
                  bias_initializer='zeros',
                  activation='relu',
                  padding='valid',
@@ -130,7 +132,8 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.filters_temporal = filters_temporal
         self.spatial_kernel_size = spatial_kernel_size
         self.temporal_frequencies = temporal_frequencies
-        self.temporal_frequencies_initial_max = temporal_frequencies_initial_max
+        self.temporal_frequencies_initial_max = np.float32(temporal_frequencies_initial_max)
+        self.temporal_frequencies_scaling = np.float32(temporal_frequencies_scaling)
         self.spatial_kernel_initializer = initializers.get(spatial_kernel_initializer)
         self.temporal_kernel_initializer = initializers.get(temporal_kernel_initializer)
         self.temporal_frequencies_initializer = initializers.get(temporal_frequencies_initializer)
@@ -149,7 +152,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.bias_regularizer = regularizers.get(bias_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.spatial_kernel_constraint = None#constraints.UnitNormOrthogonal(self.filters_complex + self.filters_simple)
+        self.spatial_kernel_constraint = constraints.UnitNormOrthogonal(self.filters_complex + self.filters_simple)
         self.temporal_kernel_constraint = constraints.get(temporal_kernel_constraint)
         self.temporal_frequencies_constraint = constraints.get(temporal_frequencies_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
@@ -194,13 +197,13 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         else:
             self.bias = None
 
-        self.temporal_freqs = self.add_weight((self.temporal_frequencies, self.temporal_frequencies_initial_max),
+        self.temporal_freqs = self.add_weight((self.temporal_frequencies, self.temporal_frequencies_initial_max/self.temporal_frequencies_scaling),
                                               initializer=step_init,
                                               name='temporal_frequencies',
                                               regularizer=self.temporal_frequencies_regularizer,
                                               constraint=self.temporal_frequencies_constraint)
 
-        self.delays_pi = K.variable(2 * np.pi * np.arange(0, 1 + 1. / (self.delays - 1), 1. / (self.delays - 1)), name='delays_pi')
+        self.delays_pi = K.variable(2 * np.pi * np.arange(0, 1 + 1. / (self.delays - 1), 1. / (self.delays - 1))[:self.delays], name='delays_pi')
 
         # Set input spec.
         self.input_spec = InputSpec(ndim=5,
@@ -239,8 +242,8 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         xshape = K.shape(inputs)
         inputs = K.reshape(inputs, (-1, xshape[2], xshape[3], xshape[4]))
 
-        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
-        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
+        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_frequencies_scaling*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
+        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_frequencies_scaling*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
 
         w0t = K.concatenate((cos_step, -sin_step), axis=0)
         w1t = K.concatenate((sin_step, cos_step), axis=0)
@@ -301,6 +304,8 @@ class Convolution2DEnergy_TemporalBasis(Layer):
                   'filters_temporal': self.filters_temporal,
                   'spatial_kernel_size': self.spatial_kernel_size,
                   'temporal_frequencies': self.temporal_frequencies,
+                  'temporal_frequencies_initial_max': self.temporal_frequencies_initial_max,
+                  'temporal_frequencies_scaling': self.temporal_frequencies_scaling,
                   'strides': self.strides,
                   'padding': self.padding,
                   'data_format': self.data_format,
@@ -363,7 +368,7 @@ class Convolution2DEnergy_Scatter(Layer):
         self.bias_regularizer = regularizers.get(bias_regularizer)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
-        self.kernel_constraint = None#constraints.UnitNormOrthogonal(filters_complex)
+        self.kernel_constraint = constraints.UnitNormOrthogonal(filters_complex)
         self.bias_constraint = constraints.get(bias_constraint)
 
         self.use_bias = use_bias
@@ -1003,6 +1008,127 @@ class GDNConv2D(_ConvGDN):
         config = super(GDNConv2D, self).get_config()
         config.pop('rank')
         return config
+
+
+class Conv2DSoftMinMax(Layer):
+    def __init__(self, filters,
+                 kernel_initializer='glorot_uniform',
+                 kernel_regularizer=None,
+                 kernel_constraint=kconstraints.NonNeg(),
+                 k_initializer='zeros',
+                 k_regularizer=None,
+                 k_constraint=None,
+                 tied_k=False,
+                 activity_regularizer=None,
+                 strides=1,
+                 padding='valid',
+                 dilation_rate=1,
+                 data_format=K.image_data_format(),
+                 **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+        super(Conv2DSoftMinMax, self).__init__(**kwargs)
+
+        self.filters = filters
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.kernel_constraint = constraints.get(kernel_constraint)
+        self.k_initializer = initializers.get(k_initializer)
+        self.k_regularizer = regularizers.get(k_regularizer)
+        self.k_constraint = constraints.get(k_constraint)
+        self.tied_k = tied_k
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+        self.strides = conv_utils.normalize_tuple(strides, 2, 'strides')
+        self.dilation_rate = conv_utils.normalize_tuple(dilation_rate, 2, 'dilation_rate')
+        self.padding = conv_utils.normalize_padding(padding)
+        self.input_spec = InputSpec(min_ndim=2)
+        self.data_format = data_format
+        self.supports_masking = True
+
+    def build(self, input_shape):
+        if self.data_format == 'channels_first':
+            channel_axis = 1
+        else:
+            channel_axis = -1
+        if input_shape[channel_axis] is None:
+            raise ValueError('The channel dimension of the inputs '
+                             'should be defined. Found `None`.')
+        input_dim = input_shape[channel_axis]
+        kernel_shape = (input_dim, self.filters)
+
+        self.kernel = self.add_weight(kernel_shape,
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
+
+        if self.tied_k:
+            k_size = (1,)
+        else:
+            k_size = (self.filters,)
+
+        self.k = self.add_weight(shape=k_size,
+                                 initializer=self.k_initializer,
+                                 name='k',
+                                 regularizer=self.k_regularizer,
+                                 constraint=self.k_constraint)
+        # Set input spec.
+        self.input_spec = InputSpec(ndim=4,
+                                    axes={channel_axis: input_dim})
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+        if self.data_format == 'channels_last':
+            space = input_shape[1:-1]
+            new_space = []
+            for i in range(len(space)):
+                new_dim = conv_utils.conv_output_length(
+                    space[i],
+                    1,
+                    padding=self.padding,
+                    stride=self.strides[i],
+                    dilation=self.dilation_rate[i])
+                new_space.append(new_dim)
+            return (input_shape[0],) + tuple(new_space) + (self.filters,)
+        if self.data_format == 'channels_first':
+            space = input_shape[2:]
+            new_space = []
+            for i in range(len(space)):
+                new_dim = conv_utils.conv_output_length(
+                    space[i],
+                    1,
+                    padding=self.padding,
+                    stride=self.strides[i],
+                    dilation=self.dilation_rate[i])
+                new_space.append(new_dim)
+            return (input_shape[0], self.filters) + tuple(new_space)
+
+    def call(self, inputs):
+        W = self.kernel
+        if self.tied_k:
+            kX = self.k[0] * inputs
+            kX = K.clip(kX, -30, 30)
+            wekx = W[None, :, :] * K.exp(kX[:, :, None])
+        else:
+            kX = self.k[None, None, :, None, None] * inputs[:, :, None, :, :]
+            kX = K.clip(kX, -30, 30)
+            wekx = W[None, :, :, None, None] * K.exp(kX)
+        output = K.sum(inputs[:, :, None, :, :] * wekx, axis=1) / (K.sum(wekx, axis=1) + K.epsilon())
+        return output
+
+    def get_config(self):
+        config = {
+            'units': self.units,
+            'kernel_initializer': initializers.serialize(self.kernel_initializer),
+            'k_initializer': initializers.serialize(self.k_initializer),
+            'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+            'k_regularizer': regularizers.serialize(self.k_regularizer),
+            'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+            'kernel_constraint': constraints.serialize(self.kernel_constraint),
+            'k_constraint': constraints.serialize(self.k_constraint)
+        }
+        base_config = super(Conv2DSoftMinMax, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
 
 
 class GDNConv3D(_ConvGDN):

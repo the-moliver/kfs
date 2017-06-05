@@ -23,23 +23,27 @@ class CoupledGaussianDropout(Layer):
         Same shape as input.
 
     # References
-        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting Srivastava, Hinton, et al. 2014](http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
+        - [Dropout: A Simple Way to Prevent Neural Networks from Overfitting
+          Srivastava, Hinton, et al. 2014]
+          (http://www.cs.toronto.edu/~rsalakhu/papers/srivastava14a.pdf)
     """
 
-    def __init__(self, factor=1, **kwargs):
+    def __init__(self, factor=1., **kwargs):
         super(CoupledGaussianDropout, self).__init__(**kwargs)
         self.supports_masking = True
         self.factor = factor
 
     def call(self, inputs, training=None):
         def noised():
+            stddev = K.stop_gradient(K.sqrt(K.clip(self.factor * K.abs(inputs),
+                                                   K.epsilon(), None)))
             return inputs + K.random_normal(shape=K.shape(inputs),
                                             mean=0.0,
-                                            stddev=self.factor * K.sqrt(K.abs(inputs) + K.epsilon()))
+                                            stddev=stddev)
         return K.in_train_phase(noised, inputs, training=training)
 
     def get_config(self):
-        config = {'rate': self.rate}
+        config = {'factor': self.factor}
         base_config = super(CoupledGaussianDropout, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
