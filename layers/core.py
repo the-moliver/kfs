@@ -185,7 +185,7 @@ class FilterDims(Layer):
             ax1 = [a-1 for a in self.sum_axes]
             ax1 = ax1 + list(set(range(ndim)) - set(ax1))
             ax2 = list(set(range(ndim)) - set(self.sum_axes))
-            permute_dims = range(len(ax2))
+            permute_dims = list(range(len(ax2)))
             permute_dims.insert(self.sum_axes[0], len(ax2))
             outdims = [-1] + [xshape[a] for a in ax2[1:]] + [self.filters]
             ax2 = ax2 + self.sum_axes
@@ -249,7 +249,7 @@ class FilterDims(Layer):
                 output_shape[i] = input_shape[i]
 
             output_shape.append(self.filters)
-            permute_dims = range(ndim + 1)
+            permute_dims = list(range(ndim + 1))
             permute_dims[self.sum_axes[0]] = ndim
             permute_dims[ndim] = self.sum_axes[0]
             output_shape = [output_shape[i] for i in permute_dims]
