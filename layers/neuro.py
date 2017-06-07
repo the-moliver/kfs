@@ -4,18 +4,98 @@ from __future__ import division
 
 import numpy as np
 
-from collections import OrderedDict
-import copy
-from six.moves import zip
-
 from keras import backend as K
-from keras import activations, initializations, regularizers, constraints
-from keras.regularizers import ActivityRegularizer
-from keras.engine import InputSpec, Layer, Merge
+from keras import activations, initializers, regularizers, constraints
+from keras.engine import InputSpec, Layer
 
-import marshal
-import types
-import sys
+
+class GaussianReceptiveFields(Layer):
+
+    def __init__(self, filters,
+                 centers_initializer='zeros',
+                 centers_regularizer=None,
+                 centers_constraint=None,
+                 stds_initializer='ones',
+                 stds_regularizer=None,
+                 stds_constraint=None,
+                 gauss_scale=100,
+                 **kwargs):
+        self.filters = filters
+        self.gauss_scale = gauss_scale
+        super(GaussianReceptiveFields, self).__init__(**kwargs)
+        self.centers_initializer = initializers.get(centers_initializer)
+        self.stds_initializer = initializers.get(stds_initializer)
+        self.centers_regularizer = regularizers.get(centers_regularizer)
+        self.stds_regularizer = regularizers.get(stds_regularizer)
+        self.centers_constraint = constraints.get(centers_constraint)
+        self.stds_constraint = constraints.get(stds_constraint)
+
+    def build(self, input_shape):
+        ndim = len(input_shape[0])
+        assert ndim >= 2
+
+        kernel_shape = [1] * (ndim) + [self.filters]
+        kernel_broadcast = [True] * (ndim) + [False]
+
+        self.filter_axes = np.arange(ndim - 2, ndim)
+
+        for i in self.filter_axes:
+            kernel_shape[i] = input_shape[0][i]
+            kernel_broadcast[i] = False
+        kernel_shape[0] = -1
+        kernel_broadcast[0] = False
+
+
+        self.centers = self.add_weight((2, self.filters),
+                                      initializer=self.centers_initializer,
+                                      name='centers',
+                                      regularizer=self.centers_regularizer,
+                                      constraint=self.centers_constraint)
+
+        self.stds = self.add_weight((self.filters,),
+                                      initializer=self.stds_initializer,
+                                      name='stds',
+                                      regularizer=self.stds_regularizer,
+                                      constraint=self.stds_constraint)
+
+
+        maxshape = np.max(input_shape[0][-2:])
+        dx = 1. / (maxshape - 1)
+        self.dx = 2*dx
+        maxrange = 2*(np.arange(0, 1+dx, dx) - .5)
+
+        X = maxrange[np.int((maxshape - input_shape[0][-1]) / 2): np.int((maxshape + input_shape[0][-1]) / 2)]    
+        Y = maxrange[np.int((maxshape - input_shape[0][-2]) / 2): np.int((maxshape + input_shape[0][-2]) / 2)]
+
+        (XX, YY) = np.meshgrid(X, Y)
+
+        self.XX = K.variable(XX)
+        self.YY = K.variable(YY)
+
+        self.kernel_broadcast = kernel_broadcast
+        self.kernel_shape = kernel_shape
+        self.built = True
+
+    def call(self, inputs):
+        stim = inputs[0]
+        center = inputs[1][0]
+        centers_x = self.XX[None, :, :, None] - center[:, 0, None, None, None] - self.centers[0][None, None, None, :]
+        centers_y = self.YY[None, :, :, None] - center[:, 1, None, None, None] - self.centers[1][None, None, None, :]
+        senv = self.stds[None, None, None, :]
+        gauss = self.gauss_scale * (K.square(self.dx) / (2 * np.pi * K.square(senv) + K.epsilon()))*K.exp(-(K.square(centers_x) + K.square(centers_y))/(2.0 * K.square(senv)))
+        # gauss = (1 / K.sqrt(2 * np.pi * K.square(senv) + K.epsilon()))*K.exp(-(K.square(centers_x) + K.square(centers_y))/(2.0 * K.square(senv)))
+        # gauss /= K.max(gauss, axis=(1, 2), keepdims=True)
+        gauss = K.reshape(gauss, self.kernel_shape)
+
+        if K.backend() == 'theano':
+            output = K.sum(stim[..., None] * K.pattern_broadcast(gauss, self.kernel_broadcast), axis=self.filter_axes, keepdims=False)
+        else:
+            output = K.sum(stim[..., None] * gauss, axis=self.filter_axes, keepdims=False)
+
+        return output
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0][:-2] + tuple([self.filters])
 
 
 class GQM(Layer):

@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 from keras import backend as K
-from keras.regularizers import Regularizer
+from keras.regularizers import Regularizer, serialize, deserialize, get
 import numpy as np
 
 if K.backend() == 'theano':
@@ -45,6 +45,44 @@ class XCovRegularizer(Regularizer):
                 "gamma": float(self.gamma),
                 "axis": self.axis,
                 "division_idx": self.division_idx}
+
+
+class LocalOrthoRegularizer(Regularizer):
+    """Locally constrained decorrelation regularizier
+
+    # Arguments
+        gamma: Float; regularization factor.
+        lam: Float; controls angle-of-influence.
+        axis: Int; Axis along which to compute cross-covariance
+
+    # References
+        - [REGULARIZING CNNS WITH LOCALLY CONSTRAINED DECORRELATIONS. Pau Rodriguez et al, 2017](https://openreview.net/pdf?id=ByOvsIqeg)
+    """
+    def __init__(self, gamma=1., lam=10., axis='last'):
+        self.gamma = K.cast_to_floatx(gamma)
+        self.lam = K.cast_to_floatx(lam)
+        self.axis = axis
+
+    def set_layer(self, layer):
+        self.layer = layer
+
+    def __call__(self, x):
+        xshape = K.int_shape(x)
+        if self.axis is 'last':
+            x = K.reshape(x, (-1, xshape[-1]))
+            x /= K.sqrt(K.sum(K.square(x), axis=0, keepdims=True))
+            xx = K.dot(K.transpose(x), x)
+            return self.gamma * K.sum(K.log(1.0 + K.exp(self.lam * (xx - 1.0))) * (1.0 - K.eye(xshape[-1])))
+        elif self.axis is 'first':
+            x = K.reshape(x, (xshape[0], -1))
+            x /= K.sqrt(K.sum(K.square(x), axis=1, keepdims=True))
+            xx = K.dot(x, K.transpose(x))
+            return self.gamma * K.sum(K.log(1.0 + K.exp(self.lam * (xx - 1.0))) * (1.0 - K.eye(xshape[0])))
+
+    def get_config(self):
+        return {"name": self.__class__.__name__,
+                "gamma": float(self.gamma),
+                "lam": float(self.lam)}
 
 
 class StochasticWeightRegularizer(Regularizer):
@@ -251,8 +289,3 @@ def diffrc(X):
         Xout2[-1, 0].assign(X[-2, 1]+X[-1, 0])
         Xout2[1:-1, 0].assign(X[:-2, 1]+X[2:, 0])
     return (Xout1 - Xout2)/4
-
-
-from keras.utils.generic_utils import get_from_module
-def get(identifier, kwargs=None):
-    return get_from_module(identifier, globals(), 'regularizer', instantiate=True, kwargs=kwargs)
