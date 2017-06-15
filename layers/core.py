@@ -180,9 +180,6 @@ class FilterDims(Layer):
         ndim = K.ndim(x)
         xshape = K.shape(x)
         W = self.kernel_activation(self.kernel)
-        print(self.kernel.shape.eval())
-        # print(self.bias.shape.eval())
-        print(self.bias_broadcast)
 
         if self.filter_axes == self.sum_axes:
             ax1 = [a-1 for a in self.sum_axes]
@@ -191,15 +188,10 @@ class FilterDims(Layer):
             else:
                 ax1 = ax1 + list(set(range(ndim - 1)) - set(ax1))
             ax2 = list(set(range(ndim)) - set(self.sum_axes))
-            print(ax1)
-            print(ax2)
             permute_dims = range(len(ax2))
             permute_dims.insert(self.sum_axes[0], len(ax2))
-            print(permute_dims)
             outdims = [-1] + [xshape[a] for a in ax2[1:]] + [self.filters]
             ax2 = ax2 + self.sum_axes
-            print(ax2)
-            print(outdims)
             W = K.permute_dimensions(W, ax1)
             W = K.reshape(W, (-1, self.filters))
             x = K.permute_dimensions(x, ax2)
@@ -207,7 +199,6 @@ class FilterDims(Layer):
             output = K.reshape(K.dot(x, W), outdims)
             if self.use_bias:
                 b_broadcast = [i for j, i in enumerate(self.bias_broadcast) if j not in self.sum_axes]
-                print(b_broadcast)
                 b = K.squeeze(self.bias, self.sum_axes[0])
                 if len(self.sum_axes) > 1:
                     b = K.squeeze(b, self.sum_axes[1] - 1)
