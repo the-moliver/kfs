@@ -264,6 +264,8 @@ class FilterDims(Layer):
         else:
             output_shape = input_shape
             output_shape = [output_shape[i] for i in set(range(len(input_shape))) - set(self.sum_axes)]
+            if len(output_shape) == 1:
+                output_shape.append(1)
 
         return tuple(output_shape)
 
