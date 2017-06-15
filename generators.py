@@ -34,9 +34,9 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
     '''
     index_array = np.arange(x.shape[0])
     if conv3d:
-        tlist = [1, 2, 0] + range(3, np.ndim(x) + 1)
+        tlist = [1, 2, 0] + list(range(3, np.ndim(x) + 1))
     else:
-        tlist = [1, 0] + range(2, np.ndim(x) + 1)
+        tlist = [1, 0] + list(range(2, np.ndim(x) + 1))
     batches = _make_batches(x.shape[0], batch_size)
     while 1:
         if shuffle:

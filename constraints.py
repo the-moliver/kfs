@@ -21,7 +21,7 @@ class UnitNormOrthogonal(Constraint):
 
     def __call__(self, p):
         # if self.data_format == 'channels_last':
-        rotate_axis = range(K.ndim(p))
+        rotate_axis = list(range(K.ndim(p)))
         rotate_axis = [rotate_axis[-1]] + rotate_axis[:-1]
         p = K.permute_dimensions(p, rotate_axis)
 
@@ -43,7 +43,7 @@ class UnitNormOrthogonal(Constraint):
         out = K.concatenate((v, v2, x), axis=0)
 
         # if self.dim_ordering == 'tf':
-        rotate_axis = range(K.ndim(out))
+        rotate_axis = list(range(K.ndim(out)))
         rotate_axis = rotate_axis[1:] + [rotate_axis[0]]
         out = K.permute_dimensions(out, rotate_axis)
         return out
