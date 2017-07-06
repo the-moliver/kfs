@@ -242,8 +242,8 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         xshape = K.shape(inputs)
         inputs = K.reshape(inputs, (-1, xshape[2], xshape[3], xshape[4]))
 
-        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_frequencies_scaling*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
-        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None])*self.temporal_frequencies_scaling*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
+        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None]*self.temporal_frequencies_scaling)*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
+        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None]*self.temporal_freqs[None, :, None]*self.temporal_frequencies_scaling)*self.temporal_kernel[:, None, :], (-1, self.filters_temporal*self.temporal_frequencies))
 
         w0t = K.concatenate((cos_step, -sin_step), axis=0)
         w1t = K.concatenate((sin_step, cos_step), axis=0)
