@@ -46,17 +46,15 @@ class Convolution2DEnergy_TemporalBasis(Layer):
     # Arguments
         filters_simple: Number of simple-cell filters to use.
         filters_complex: Number of complex-cell filters to use.
-        nb_row: Number of rows in the convolution kernel.
-        nb_col: Number of columns in the convolution kernel.
-        nb_temporal_amplitude: Number of amplitude profiles
-        nb_temporal_freq: Number of temporal frequencies (odd number)
-        tf_max: Maximum temporal frequency, temporal frequencies initialized
-                as (-tf_max..., 0, ..., tf_max)
-        init: name of initialization function for the weights of the layer
-            (see [initializers](../initializers.md)), or alternatively,
-            Theano function to use for weights initialization.
-            This parameter is only relevant if you don't pass
-            a `weights` argument.
+        spatial_kernel_size: Tuple containing number of rows and columns in the convolution kernel.
+        filters_temporal: Number of temporal amplitude filters
+        temporal_frequencies: Number of temporal frequencies (odd number)
+        temporal_frequencies_initial_max: Maximum temporal frequency, temporal frequencies initialized
+            as (-tf_max..., 0, ..., tf_max)
+        spatial_kernel_initializer: name of initialization function for the spatial kernel weights
+            (see [initializers](../initializers.md))
+        temporal_kernel_initializer: name of initialization function for the temporal kernel weights
+            (see [initializers](../initializers.md))
         activation: name of activation function to use
             (see [activations](../activations.md)),
             or alternatively, elementwise Theano function.
@@ -67,16 +65,18 @@ class Convolution2DEnergy_TemporalBasis(Layer):
             ('full' requires the Theano backend).
         strides: tuple of length 2. Factor by which to strides output.
             Also called strides elsewhere.
-        kernel_regularizer: instance of [WeightRegularizer](../regularizers.md)
-            (eg. L1 or L2 regularization), applied to the main weights matrix.
-        bias_regularizer: instance of [WeightRegularizer](../regularizers.md),
-            applied to the bias.
-        Wt_regularizer: instance of [WeightRegularizer](../regularizers.md)
+        spatial_kernel_regularizer: instance of [WeightRegularizer](../regularizers.md)
+            (eg. L1 or L2 regularization), applied to the spatial kernel weights matrix.
+        temporal_kernel_regularizer: instance of [WeightRegularizer](../regularizers.md)
             (eg. L2 or Laplacian regularization), applied to the temporal amplitude
             weights matrix.
+        bias_regularizer: instance of [WeightRegularizer](../regularizers.md),
+            applied to the bias.
         activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
             applied to the network output.
-        Wt_constraint: instance of the [constraints](../constraints.md) module
+        spatial_kernel_constraint: instance of the [constraints](../constraints.md) module
+            (eg. maxnorm, nonneg), applied to the main weights matrix.
+        temporal_kernel_constraint: instance of the [constraints](../constraints.md) module
             (eg. maxnorm, nonneg), applied to the main weights matrix.
         bias_constraint: instance of the [constraints](../constraints.md) module,
             applied to the bias.
@@ -84,8 +84,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
             (the depth) is at index 1, in 'channels_last' mode is it at index 3.
             It defaults to the `image_data_format` value found in your
             Keras config file at `~/.keras/keras.json`.
-            If you never set it, then it will be "tf".
-        bias: whether to include a bias
+        use_bias: whether to include a bias
             (i.e. make the layer affine rather than linear).
     # Input shape
         5D tensor with shape:
