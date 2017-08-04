@@ -6,7 +6,7 @@ python:
 
 script:
         - set -e
-        - pip install numpy keras
+        - pip install numpy theano keras
         - python setup.py install
-        - pytest
+        - KERAS_BACKEND=theano pytest
 
