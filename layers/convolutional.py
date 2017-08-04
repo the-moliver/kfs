@@ -1241,3 +1241,392 @@ class GDNConv3D(_ConvGDN):
         config = super(GDNConv3D, self).get_config()
         config.pop('rank')
         return config
+
+
+class Convolution2DEnergy_TemporalCorrelation(Layer):
+    def __init__(self, filters_simple,
+                 filters_complex,
+                 filters_temporal,
+                 spatial_kernel_size,
+                 temporal_frequencies,
+                 temporal_kernel_size=None,
+                 spatial_kernel_initializer='glorot_uniform',
+                 temporal_kernel_initializer='glorot_uniform',
+                 temporal_frequencies_initializer=step_init,
+                 temporal_frequencies_initial_max=2,
+                 temporal_frequencies_scaling=10,
+                 bias_initializer='zeros',
+                 activation='relu',
+                 padding='valid',
+                 strides=(1, 1),
+                 dilation_rate=(1, 1),
+                 data_format=K.image_data_format(),
+                 spatial_kernel_regularizer=None,
+                 temporal_kernel_regularizer=None,
+                 temporal_frequencies_regularizer=None,
+                 bias_regularizer=None,
+                 activity_regularizer=None,
+                 spatial_kernel_constraint=None,
+                 temporal_kernel_constraint=None,
+                 temporal_frequencies_constraint=None,
+                 bias_constraint=None,
+                 use_bias=True, **kwargs):
+
+        self.filters_simple = filters_simple
+        self.filters_complex = filters_complex
+        self.filters_temporal = filters_temporal
+        self.spatial_kernel_size = spatial_kernel_size
+        self.temporal_kernel_size = temporal_kernel_size
+        self.temporal_frequencies = temporal_frequencies
+        self.temporal_frequencies_initial_max = np.float32(
+                                    temporal_frequencies_initial_max)
+        self.temporal_frequencies_scaling = np.float32(
+                                    temporal_frequencies_scaling)
+        self.spatial_kernel_initializer = initializers.get(
+                                    spatial_kernel_initializer)
+        self.temporal_kernel_initializer = initializers.get(
+                                    temporal_kernel_initializer)
+        self.temporal_frequencies_initializer = initializers.get(
+                                    temporal_frequencies_initializer)
+        self.bias_initializer = initializers.get(bias_initializer)
+        self.activation = activations.get(activation)
+        assert padding in {'valid', 'same'}, 'padding must be in {valid, same}'
+        self.padding = padding
+        self.strides = strides
+        self.dilation_rate = dilation_rate
+        assert data_format in {'channels_last', 'channels_first'}, (
+                    'data_format must be in {channels_first, channels_last}')
+        self.data_format = data_format
+
+        self.spatial_kernel_regularizer = regularizers.get(
+                                    spatial_kernel_regularizer)
+        self.temporal_kernel_regularizer = regularizers.get(
+                                    temporal_kernel_regularizer)
+        self.temporal_frequencies_regularizer = regularizers.get(
+                                    temporal_frequencies_regularizer)
+        self.bias_regularizer = regularizers.get(bias_regularizer)
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+
+        self.spatial_kernel_constraint = constraints.UnitNormOrthogonal(
+                                    self.filters_complex + self.filters_simple)
+        self.temporal_kernel_constraint = constraints.get(
+                                    temporal_kernel_constraint)
+        self.temporal_frequencies_constraint = constraints.get(
+                                    temporal_frequencies_constraint)
+        self.bias_constraint = constraints.get(bias_constraint)
+
+        self.use_bias = use_bias
+        self.input_spec = [InputSpec(ndim=5)]
+
+        super(Convolution2DEnergy_TemporalCorrelation, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert len(input_shape) == 5
+        if self.data_format == 'channels_first':
+            channel_axis = 2
+        else:
+            channel_axis = -1
+        if input_shape[channel_axis] is None:
+            raise ValueError('The channel dimension of the inputs '
+                             'should be defined. Found `None`.')
+
+        self.delays = input_shape[1]
+        temporal_kernel_size = self.temporal_kernel_size
+        if temporal_kernel_size is None:
+            temporal_kernel_size = self.delays
+
+        input_dim = input_shape[channel_axis]
+        spatial_kernel_shape = self.spatial_kernel_size + (input_dim, 
+                2 * self.filters_complex + 2 * self.filters_simple)
+
+        self.spatial_kernel = self.add_weight(spatial_kernel_shape,
+                                initializer=self.spatial_kernel_initializer,
+                                name='spatial_kernel',
+                                regularizer=self.spatial_kernel_regularizer,
+                                constraint=self.spatial_kernel_constraint)
+
+        self.temporal_kernel = self.add_weight(
+                                (temporal_kernel_size, self.filters_temporal),
+                                initializer=self.temporal_kernel_initializer,
+                                name='temporal_kernel',
+                                regularizer=self.temporal_kernel_regularizer,
+                                constraint=self.temporal_kernel_constraint)
+
+        if self.use_bias:
+            self.bias = self.add_weight(
+                                (self.filters_complex + self.filters_simple,),
+                                initializer=self.bias_initializer,
+                                name='bias',
+                                regularizer=self.bias_regularizer,
+                                constraint=self.bias_constraint)
+        else:
+            self.bias = None
+
+        self.temporal_freqs = self.add_weight(
+                            (self.temporal_frequencies, 
+                                self.temporal_frequencies_initial_max / 
+                                self.temporal_frequencies_scaling),
+                            initializer=step_init,
+                            name='temporal_frequencies',
+                            regularizer=self.temporal_frequencies_regularizer,
+                            constraint=self.temporal_frequencies_constraint)
+
+        self.delays_pi = K.variable(
+                2 * np.pi * np.arange(0, 1 + 1. / (temporal_kernel_size - 1),
+                1. / (temporal_kernel_size - 1))[:temporal_kernel_size],
+                name='delays_pi')
+
+        # Set input spec.
+        self.input_spec = InputSpec(ndim=5, axes={channel_axis: input_dim})
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+        if self.data_format == 'channels_first':
+            conv_dim2 = input_shape[3]
+            conv_dim3 = input_shape[4]
+        elif self.data_format == 'channels_last':
+            conv_dim2 = input_shape[2]
+            conv_dim3 = input_shape[3]
+        else:
+            raise Exception('Invalid data_format: ' + self.data_format)
+
+        conv_dim2 = conv_utils.conv_output_length(conv_dim2,
+                                          self.spatial_kernel_size[0],
+                                          padding=self.padding,
+                                          stride=self.strides[0],
+                                          dilation=self.dilation_rate[0])
+        conv_dim3 = conv_utils.conv_output_length(conv_dim3,
+                                          self.spatial_kernel_size[1],
+                                          padding=self.padding,
+                                          stride=self.strides[1],
+                                          dilation=self.dilation_rate[1])
+
+        temporal_kernel_size = self.temporal_kernel_size
+        if temporal_kernel_size is None:
+            temporal_kernel_size = self.delays
+
+        tdim = self.delays - temporal_kernel_size + 1
+
+        if self.data_format == 'channels_first':
+            return (input_shape[0],
+                    self.filters_temporal*self.temporal_frequencies,
+                    (self.filters_complex + self.filters_simple), conv_dim2,
+                    conv_dim3, tdim)
+        elif self.data_format == 'channels_last':
+            return (input_shape[0],
+                    self.filters_temporal*self.temporal_frequencies, conv_dim2,
+                    conv_dim3, (self.filters_complex + self.filters_simple),
+                    tdim)
+        else:
+            raise Exception('Invalid data_format: ' + self.data_format)
+
+    def call(self, inputs):
+        xshape = K.shape(inputs)
+        inputs = K.reshape(inputs, (-1, xshape[2], xshape[3], xshape[4]))
+
+        sin_step = K.reshape(K.sin(self.delays_pi[:, None, None] *
+                                self.temporal_freqs[None, :, None]) *
+                                self.temporal_frequencies_scaling *
+                                self.temporal_kernel[:, None, :],
+                        (-1, self.filters_temporal *
+                                self.temporal_frequencies))
+
+        cos_step = K.reshape(K.cos(self.delays_pi[:, None, None] *
+                                self.temporal_freqs[None, :, None]) *
+                                self.temporal_frequencies_scaling *
+                                self.temporal_kernel[:, None, :], 
+                        (-1, self.filters_temporal *
+                                self.temporal_frequencies))
+
+        conv_out1 = K.conv2d(
+            inputs,
+            self.spatial_kernel,
+            strides=self.strides,
+            padding=self.padding,
+            data_format=self.data_format,
+            dilation_rate=self.dilation_rate)
+
+        conv_out1_shape = K.shape(conv_out1)
+
+        conv_out1 = K.reshape(conv_out1, (-1, self.delays, conv_out1_shape[1],
+                                conv_out1_shape[2], conv_out1_shape[3]))
+
+        if self.data_format == 'channels_first':
+            # samps x delays x stack x X x Y
+            conv_out1 = K.permute_dimensions(conv_out1, (0, 2, 3, 4, 1))
+            # samps x stack x X x Y x delays
+        elif self.data_format == 'channels_last':
+            # samps x delays x X x Y x stack
+            conv_out1 = K.permute_dimensions(conv_out1, (0, 4, 2, 3, 1))
+            # samps x stack x X x Y x delays
+        else:
+            raise Exception('Invalid data_format: ' + self.data_format)
+
+
+        conv_complex_re = conv_out1[:, :self.filters_complex, :, :, :]
+        conv_complex_im = conv_out1[:,
+                        self.filters_complex+self.filters_simple:
+                        2 * self.filters_complex + self.filters_simple,
+                                                                    :, :, :]
+        conv_simple_re = conv_out1[:,
+                        self.filters_complex:self.filters_complex +
+                                                self.filters_simple, :, :, :]
+        conv_simple_im = conv_out1[:, 2 * self.filters_complex +
+                                                self.filters_simple:, :, :, :]
+
+        B = conv_complex_re.shape[0]
+        Pc = (conv_complex_re.shape[1],
+                conv_complex_re.shape[2],
+                conv_complex_re.shape[3])
+        pc = K.prod(conv_complex_re.shape[1:4])
+        Ps = (conv_simple_re.shape[1],
+                conv_simple_re.shape[2],
+                conv_simple_re.shape[3])
+        ps = K.prod(conv_simple_re.shape[1:4])
+        l = conv_complex_re.shape[4]
+        conv_complex = K.concatenate([conv_complex_re.reshape((B, 1, pc, l)),
+                                        conv_complex_im.reshape((B, 1, pc, l))],
+                                        axis=1)
+        conv_simple = K.concatenate([conv_simple_re.reshape((B, 1, ps, l)),
+                                        conv_simple_im.reshape((B, 1, ps, l))],
+                                        axis=1)
+
+        # if image_data_format is channels_last, we have to adapt the data
+        # ordering of conv_complex and conv_simple
+        if self.data_format == 'channels_last':
+            conv_complex = K.permute_dimensions(conv_complex, (0, 2, 3, 1))
+            conv_simple = K.permute_dimensions(conv_simple, (0, 2, 3, 1))
+
+        w0t = K.concatenate((cos_step[np.newaxis, ::-1, np.newaxis, :],
+                            -sin_step[np.newaxis, ::-1, np.newaxis, :]),
+                                                                        axis=2)
+        w1t = K.concatenate((sin_step[np.newaxis, ::-1, np.newaxis, :],
+                             cos_step[np.newaxis, ::-1, np.newaxis, :]),
+                                                                        axis=2)
+
+        temp_conv_complex_re = K.conv2d(conv_complex, w0t,
+                                strides=(1, 1), padding='valid',
+                                data_format=self.data_format,
+                                dilation_rate=(1, 1))
+        temp_conv_complex_im = K.conv2d(conv_complex, w1t,
+                                strides=(1, 1), padding='valid',
+                                data_format=self.data_format,
+                                dilation_rate=(1, 1))
+
+        temp_conv_simple_re = K.conv2d(conv_simple, w0t,
+                                strides=(1, 1), padding='valid',
+                                data_format=self.data_format,
+                                dilation_rate=(1, 1))
+        complex_moduli = K.sqrt(K.square(temp_conv_complex_re) +
+                                K.square(temp_conv_complex_im) + K.epsilon())
+
+        # if channels_last, order the dims back
+        if self.data_format == 'channels_last':
+            complex_moduli = K.permute_dimensions(complex_moduli, (0, 3, 1, 2))
+            temp_conv_simple_re = K.permute_dimensions(temp_conv_simple_re, 
+                    (0, 3, 1, 2))
+        new_l = complex_moduli.shape[-1]
+        n_out_channels = self.filters_temporal * self.temporal_frequencies
+        new_shape_complex = (B, n_out_channels) + Pc + (new_l,)
+        new_shape_simple = (B, n_out_channels) + Ps + (new_l,)
+        output = K.concatenate([complex_moduli.reshape(new_shape_complex),
+                                temp_conv_simple_re.reshape(new_shape_simple)],
+                                axis=2)
+        if self.temporal_kernel_size is None:
+            # squeeze the convolutional dimesion
+            output = output.reshape(output.shape[:-1])
+
+        if self.data_format == 'channels_first' and (
+                                        self.temporal_kernel_size is None):
+            pass
+            # samps x temporal_filters*temporal_frequencies x stack x X x Y
+        elif self.data_format == 'channels_first' and (
+                                        self.temporal_kernel_size is not None):
+            ## Looks like this one isn't necessary either
+            output = K.permute_dimensions(output, (0, 5, 1, 2, 3, 4))
+            pass
+
+        elif self.data_format == 'channels_last' and (
+                                        self.temporal_kernel_size is None):
+            output = K.permute_dimensions(output, (0, 1, 3, 4, 2))
+            # samps x temporal_filters*temporal_frequencies x X x Y x stack
+        else: # channels last and convolutional
+            output = K.permute_dimensions(output, (0, 5, 1, 3, 4, 2))
+            
+
+        if self.bias:
+            if self.data_format == 'channels_first' and (
+                                        self.temporal_kernel_size is None):
+                output += K.reshape(self.bias, (1, 1, self.filters_complex +
+                                                    self.filters_simple, 1, 1))
+            elif self.data_format == 'channels_first' and (
+                                        self.temporal_kernel_size is not None):
+                output += K.reshape(self.bias, (1, 1, 1, self.filters_complex +
+                                        self.filters_simple, 1, 1))
+
+            elif self.data_format == 'channels_last' and (
+                                        self.temporal_kernel_size is None):
+                output += K.reshape(self.bias, (1, 1, 1, 1,
+                                self.filters_complex + self.filters_simple))
+            else:
+                output += K.reshape(self.bias, (1, 1, 1, 1, 1,
+                                self.filters_complex + self.filters_simple))
+
+        output = self.activation(output)
+        return output
+
+    def get_config(self):
+        config = {'filters_simple': self.filters_simple,
+                  'filters_complex': self.filters_complex,
+                  'filters_temporal': self.filters_temporal,
+                  'spatial_kernel_size': self.spatial_kernel_size,
+                  'temporal_frequencies': self.temporal_frequencies,
+                  'temporal_frequencies_initial_max':
+                                        self.temporal_frequencies_initial_max,
+                  'temporal_frequencies_scaling':
+                                        self.temporal_frequencies_scaling,
+                  'strides': self.strides,
+                  'padding': self.padding,
+                  'data_format': self.data_format,
+                  'dilation_rate': self.dilation_rate,
+                  'activation': activations.serialize(self.activation),
+                  'use_bias': self.use_bias,
+                  'spatial_kernel_initializer': 
+                        initializers.serialize(
+                                            self.spatial_kernel_initializer),
+                  'temporal_kernel_initializer':
+                        initializers.serialize(
+                                            self.temporal_kernel_initializer),
+                  'temporal_frequencies_initializer':
+                        initializers.serialize(
+                                    self.temporal_frequencies_initializer),
+                  'bias_initializer': 
+                        initializers.serialize(self.bias_initializer),
+                  'spatial_kernel_regularizer':
+                        regularizers.serialize(
+                            self.spatial_kernel_regularizer),
+                  'temporal_kernel_regularizer':
+                        regularizers.serialize(
+                            self.temporal_kernel_regularizer),
+                  'temporal_frequencies_regularizer':
+                        regularizers.serialize(
+                            self.temporal_frequencies_regularizer),
+                  'bias_regularizer':
+                        regularizers.serialize(self.bias_regularizer),
+                  'activity_regularizer':
+                        regularizers.serialize(self.activity_regularizer),
+                  'spatial_kernel_constraint':
+                        constraints.serialize(self.spatial_kernel_constraint),
+                  'temporal_kernel_constraint':
+                        constraints.serialize(self.temporal_kernel_constraint),
+                  'temporal_frequencies_constraint':
+                        constraints.serialize(
+                            self.temporal_frequencies_constraint),
+                  'bias_constraint': 
+                        constraints.serialize(self.bias_constraint)
+                  }
+        base_config = super(
+                Convolution2DEnergy_TemporalBasis, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+

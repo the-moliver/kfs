@@ -1,0 +1,11 @@
+language: python
+
+python:
+        - 3.6
+        - 2.7
+
+script:
+        - set -e
+        - pip install numpy keras
+        - pytest
+
