@@ -122,27 +122,29 @@ class NadamAccum(Optimizer):
                  epsilon=1e-8, schedule_decay=0.004, accum_iters=1, **kwargs):
         super(NadamAccum, self).__init__(**kwargs)
         self.__dict__.update(locals())
-        self.iterations = K.variable(0.)
-        self.m_schedule = K.variable(1.)
-        self.lr = K.variable(lr)
-        self.beta_1 = K.variable(beta_1)
-        self.beta_2 = K.variable(beta_2)
+        self.iterations = K.variable(0., name='iterations')
+        self.m_schedule = K.variable(1., name='m_schedule')
+        self.lr = K.variable(lr, name='lr')
+        self.beta_1 = K.variable(beta_1, name='beta_1')
+        self.beta_2 = K.variable(beta_2, name='beta_2')
         self.schedule_decay = schedule_decay
-        self.accum_iters = K.variable(accum_iters)
+        self.epsilon = epsilon
+        self.accum_iters = K.variable(accum_iters, name='accum_iters')
 
     def get_updates(self, params, constraints, loss):
         grads = self.get_gradients(loss, params)
         self.updates = [K.update_add(self.iterations, 1)]
 
         t = (self.iterations + 1.)/self.accum_iters
-        accum_switch = K.equal((self.iterations + 1.) % self.accum_iters, 0)
+        accum_switch = K.cast(K.equal((self.iterations + 1.) % self.accum_iters, 0), dtype=K.floatx())
+
         # Due to the recommendations in [2], i.e. warming momentum schedule
         momentum_cache_t = self.beta_1 * (1. - 0.5 * (K.pow(0.96, t * self.schedule_decay)))
         momentum_cache_t_1 = self.beta_1 * (1. - 0.5 * (K.pow(0.96, (t + 1) * self.schedule_decay)))
         m_schedule_new = self.m_schedule * momentum_cache_t
         m_schedule_next = self.m_schedule * momentum_cache_t * momentum_cache_t_1
-        self.updates.append((self.m_schedule, accum_switch*m_schedule_new + (1-accum_switch)*self.m_schedule))
-
+        self.updates.append((self.m_schedule, accum_switch*m_schedule_new + (1. - accum_switch)*self.m_schedule))
+ 
         shapes = [x.shape for x in K.batch_get_value(params)]
         ms = [K.zeros(shape) for shape in shapes]
         vs = [K.zeros(shape) for shape in shapes]
@@ -161,9 +163,9 @@ class NadamAccum(Optimizer):
             v_t_prime = v_t / (1. - K.pow(self.beta_2, t))
             m_t_bar = (1. - momentum_cache_t) * g_prime + momentum_cache_t_1 * m_t_prime
 
-            self.updates.append(K.update(m, (1-accum_switch)*m + accum_switch*m_t))
-            self.updates.append(K.update(v, (1-accum_switch)*v + accum_switch*v_t))
-            self.updates.append(K.update(ga, (1-accum_switch)*(ga + gp)))
+            self.updates.append(K.update(m, (1. - accum_switch)*m + accum_switch*m_t))
+            self.updates.append(K.update(v, (1. - accum_switch)*v + accum_switch*v_t))
+            self.updates.append(K.update(ga, (1. - accum_switch)*(ga + gp)))
 
             p_t = p - self.lr * m_t_bar / (K.sqrt(v_t_prime) + self.epsilon)
             new_p = p_t
