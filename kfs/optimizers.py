@@ -181,6 +181,6 @@ class NadamAccum(Optimizer):
                   'beta_2': float(K.get_value(self.beta_2)),
                   'epsilon': self.epsilon,
                   'schedule_decay': self.schedule_decay,
-                  'accum_iters': self.accum_iters}
+                  'accum_iters': float(K.get_value(self.accum_iters))}
         base_config = super(NadamAccum, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
