@@ -1241,6 +1241,59 @@ class DivisiveNormalization(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
+class Gram(Layer):
+
+    def __init__(self, diag=True, input_dim=None, data_format=None, **kwargs):
+        super(Gram, self).__init__(**kwargs)
+        if data_format is None:
+            data_format = K.image_data_format()
+        self.data_format = data_format
+        self.diag = diag
+        self.input_dim = input_dim
+        if self.input_dim:
+            kwargs['input_shape'] = (self.input_dim,)
+
+    def build(self, input_shape):
+        ndim = len(input_shape)
+        assert ndim == 4
+        if self.data_format == 'channels_first':
+            self.stack_size = input_shape[1]
+        elif self.data_format == 'channels_last':
+            self.stack_size = input_shape[3]
+        else:
+            raise ValueError('Invalid data_format:', self.data_format)
+
+        if self.diag:
+            d = 0
+        else:
+            d = -1
+
+        self.tril = np.nonzero(np.tri(self.stack_size, self.stack_size, d).ravel())[0]
+
+        self.built = True
+
+    def call(self, x, mask=None):
+        xshape = K.int_shape(x)
+        if self.data_format == 'channels_first':
+            x = K.reshape(x, [-1, xshape[1], xshape[2]*xshape[3]])
+            out = K.batch_dot(x, K.permute_dimensions(x, [0, 2, 1]))
+        elif self.data_format == 'channels_last':
+            x = K.reshape(x, [-1, xshape[1]*xshape[2], xshape[3]])
+            out = K.batch_dot(K.permute_dimensions(x, [0, 2, 1]), x)
+
+        out = K.permute_dimensions(K.gather(K.permute_dimensions(K.reshape(out, [-1, self.stack_size**2]), [1, 0]), self.tril), [1, 0])
+        return out
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], len(self.tril))
+
+    def get_config(self):
+        config = {
+            'input_dim': self.input_dim}
+        base_config = super(Gram, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
 class GaussianMixtureDensity(Layer):
     '''A layer for creating a Gaussian Mixture Density Network.
     It should only be used as the last layer of the network and in
