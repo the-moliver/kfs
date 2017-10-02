@@ -1,5 +1,30 @@
 from keras.engine.training import _make_batches, _standardize_input_data, _standardize_sample_weights
 import numpy as np
+import threading
+
+
+class threadsafe_iter:
+    """Takes an iterator/generator and makes it thread-safe by
+    serializing call to the `next` method of given iterator/generator.
+    """
+    def __init__(self, it):
+        self.it = it
+        self.lock = threading.Lock()
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        with self.lock:
+            return self.it.next()
+
+
+def threadsafe_generator(f):
+    """A decorator that takes a generator function and makes it thread-safe.
+    """
+    def g(*a, **kw):
+        return threadsafe_iter(f(*a, **kw))
+    return g
 
 
 def _make_batches_overlap(size, batch_size, overlap, filt_length):
@@ -10,6 +35,7 @@ def _make_batches_overlap(size, batch_size, overlap, filt_length):
             for i in range(0, nb_batch)]
 
 
+@threadsafe_generator
 def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, conv3d=False):
     '''A generator to make it easy to fit time-delay regression models,
     i.e. a model where the value of y depends on past values of x
@@ -33,6 +59,9 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
 
     '''
     index_array = np.arange(x.shape[0])
+    if type(delays) is int:
+        delays = range(delays)
+
     if conv3d:
         tlist = [1, 2, 0] + list(range(3, np.ndim(x) + 1))
     else:
@@ -43,70 +72,20 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
             np.random.shuffle(index_array)
         for batch_index, (batch_start, batch_end) in enumerate(batches):
             batch_ids = index_array[batch_start:batch_end]
-            batch_ids = [np.maximum(0, batch_ids - d) for d in range(delays)]
-            x_batch = _standardize_input_data(x[batch_ids, :].transpose(tlist), ['x_batch'])
+            batch_ids_delay = [np.maximum(0, batch_ids - d) for d in delays]
+            x_batch = _standardize_input_data(x[batch_ids_delay, :].transpose(tlist), ['x_batch'])
             if y is None:
                 yield x_batch
             else:
-                y_batch = _standardize_input_data(y[batch_ids[0], :], ['y_batch'])
+                y_batch = _standardize_input_data(y[batch_ids, :], ['y_batch'])
                 if weights is not None:
-                    w_batch = weights[batch_ids[0], :][:, 0]
+                    w_batch = weights[batch_ids, :][:, 0]
                 else:
                     w_batch = np.ones(x_batch[0].shape[0])
-                w_batch[batch_ids[0] < delays] = 0.
+                w_batch[batch_ids < delays[-1]] = 0.
                 w_batch = _standardize_sample_weights(w_batch, ['w_batch'])
                 yield (x_batch, y_batch, w_batch)
 
-def time_delay_generator_jitter(x, y, delays, batch_size, weights=None, shuffle=True, conv3d=False, jitter=True, jitter_axes=[3,4], max_jitter=1):
-    '''A generator to make it easy to fit time-delay regression models,
-    i.e. a model where the value of y depends on past values of x
-
-    # Arguments
-    x: input data, as a Numpy array
-    y: targets, as a Numpy array or None for prediction generation
-    delays: number of time-steps to include in model
-    weights: Numpy array of weights for the samples
-    shuffle: Whether or not to shuffle the data (set True for training)
-
-    # Example
-    if X_train is (1000,200), Y_train is (1000,1)
-    train_gen = time_delay_generator(X_train, Y_train, delays=10, batch_size=100)
-
-    train_gen is a generator that gives:
-    x_batch as size (100,10,200) since each of the 100 samples includes the input
-    data at the current and nine previous time steps
-    y_batch as size (100,1)
-    w_batch as size (100,)
-
-    '''
-    index_array = np.arange(x.shape[0])
-    if conv3d:
-        tlist = [1, 2, 0] + range(3, np.ndim(x) + 1)
-    else:
-        tlist = [1, 0] + range(2, np.ndim(x) + 1)
-    batches = _make_batches(x.shape[0], batch_size)
-    while 1:
-        if shuffle:
-            np.random.shuffle(index_array)
-        for batch_index, (batch_start, batch_end) in enumerate(batches):
-            batch_ids = index_array[batch_start:batch_end]
-            batch_ids = [np.maximum(0, batch_ids - d) for d in range(delays)]
-            x_batch = x[batch_ids, :].transpose(tlist)
-            if jitter:
-                for j in jitter_axes:
-                    x_batch = np.roll(x_batch, np.random.randint(-max_jitter,max_jitter+1), axis=j)
-            x_batch = _standardize_input_data(x_batch, ['x_batch'])
-            if y is None:
-                yield x_batch
-            else:
-                y_batch = _standardize_input_data(y[batch_ids[0], :], ['y_batch'])
-                if weights is not None:
-                    w_batch = weights[batch_ids[0], :][:, 0]
-                else:
-                    w_batch = np.ones(x_batch[0].shape[0])
-                w_batch[batch_ids[0] < delays] = 0.
-                w_batch = _standardize_sample_weights(w_batch, ['w_batch'])
-                yield (x_batch, y_batch, w_batch)
 
 def time_delay_generator_AE(x, delays, batch_size, shuffle=True, conv3d=False):
     '''A generator to make it easy to fit time-delay regression models,

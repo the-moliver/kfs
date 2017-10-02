@@ -15,8 +15,10 @@ class UnitNormOrthogonal(Constraint):
                 specified pairs be made unit norm, but is assumed unpaired
 
     '''
-    def __init__(self, m):
+    def __init__(self, m, singles=False, interleave=False):
         self.m = m
+        self.singles = singles
+        self.interleave = interleave
         # self.data_format = data_format
 
     def __call__(self, p):
@@ -27,20 +29,33 @@ class UnitNormOrthogonal(Constraint):
 
         sumaxes = tuple(range(1, K.ndim(p)))
 
-        v = p[:self.m]
-        w = p[self.m:2*self.m]
-        x = p[2*self.m:]
+        if self.interleave:
+            if self.singles:
+                v = p[::3]
+                w = p[1::3]
+            else:
+                v = p[::2]
+                w = p[1::2]
+        else:
+            v = p[:self.m]
+            w = p[self.m:2*self.m]
 
         v2 = w - v*K.sum(v*w, axis=sumaxes, keepdims=True)/K.sum(v*v, axis=sumaxes, keepdims=True)
 
         norms_paired = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
-        norms_single = K.sqrt(K.sum(x**2, axis=sumaxes, keepdims=True))
-
         v /= norms_paired
         v2 /= norms_paired
-        x /= norms_single
 
-        out = K.concatenate((v, v2, x), axis=0)
+        if self.singles:
+            if self.interleave:
+                x = p[2::3]
+            else:
+                x = p[2*self.m:]
+            norms_single = K.sqrt(K.sum(x**2, axis=sumaxes, keepdims=True))
+            x /= norms_single
+            out = K.concatenate((v, v2, x), axis=0)
+        else:
+            out = K.concatenate((v, v2), axis=0)
 
         # if self.dim_ordering == 'tf':
         rotate_axis = list(range(K.ndim(out)))
@@ -49,7 +64,9 @@ class UnitNormOrthogonal(Constraint):
         return out
 
     def get_config(self):
-        return {'m': self.m}
+        return {'m': self.m,
+                'singles': self.singles,
+                'interleave': self.interleave}
 
 
 class Stochastic(Constraint):

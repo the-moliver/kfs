@@ -13,6 +13,7 @@ from keras import backend as K
 from keras import activations 
 from keras import initializers
 from keras import regularizers
+from kfs import constraints as kconstraints
 from keras import constraints
 from keras.engine import InputSpec
 from keras.engine import Layer
@@ -287,6 +288,261 @@ class FilterDims(Layer):
         }
         base_config = super(FilterDims, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+class FilterDimsV1(Layer):
+    '''The layer lets you filter any arbitrary set of axes by projection onto a new axis.
+    This is can be useful for reducing dimensionality and/or regularizing spatio-temporal models or other
+    models of structured data.
+
+    # Example
+
+    ```python
+        # As a temporal filter in a 5D spatio-temporal model with input shape (#samples, 12, 3, 30, 30)
+        # The input has 12 time steps, 3 color channels and X and Y of size 30:
+
+        model = Sequential()
+        model.add(TimeDistributed(Convolution2D(10, 5, 5, activation='linear', subsample=(2, 2)), input_shape=(12, 3, 30, 30)))
+
+        # The output from the previous layer has shape (#samples, 12, 10, 13, 13)
+        # We can use FilterDims to filter the 12 time steps on axis 1 by projeciton onto a new axis of 5 dimensions with a 12x5 matrix:
+
+        model.add(FilterDims(filters=5, sum_axes=[1], filter_axes=[1], bias=False))
+
+        # The weights learned by FilterDims are a set of temporal filters on the output of the spatial convolutions
+        # The output dimensionality is (#samples, 5, 10, 13, 13)
+        # We can then use FilterDims to filter the 5 temporal dimensions and 10 convolutional filter feature map
+        # dimensions to create 2 spatio-temporal filters with a 5x10x2 weight tensor:
+
+        model.add(FilterDims(filters=2, sum_axes=[1, 2], filter_axes=[1, 2], bias=False))
+
+        # The output dimensionality is (#samples, 2, 13, 13)
+        # We can then use FilterDims to spatially filter each spatio-temporal dimension with a 2x13x13 tensor:
+
+        model.add(FilterDims(filters=1, sum_axes=[2, 3], filter_axes=[1, 2, 3], bias=False))
+
+        # We only sum over the last two spatial axes resutling in an output dimensionality of (#samples, 2)
+    ```
+
+    # Arguments
+        filters: number of filters to apply.
+        filter_axes: a list of the axes of the input to filter
+        sum_axes: a list of the axes of the input that should be summed across after filtering
+        init: name of initialization function for the weights of the layer
+            (see [initializations](../initializations.md)),
+            or alternatively, Theano function to use for weights
+            initialization. This parameter is only relevant
+            if you don't pass a `weights` argument.
+        activation: name of activation function to use
+            (see [activations](../activations.md)),
+            or alternatively, elementwise Theano function.
+            If you don't specify anything, no activation is applied
+            (ie. "linear" activation: a(x) = x).
+        weights: list of Numpy arrays to set as initial weights.
+            The list should have 2 elements, of shape `(input_dim, output_dim)`
+            and (output_dim,) for weights and biases respectively.
+        W_regularizer: instance of [WeightRegularizer](../regularizers.md)
+            (eg. L1 or L2 regularization), applied to the main weights matrix.
+        b_regularizer: instance of [WeightRegularizer](../regularizers.md),
+            applied to the bias.
+        activity_regularizer: instance of [ActivityRegularizer](../regularizers.md),
+            applied to the network output.
+        W_constraint: instance of the [constraints](../constraints.md) module
+            (eg. maxnorm, nonneg), applied to the main weights matrix.
+        b_constraint: instance of the [constraints](../constraints.md) module,
+            applied to the bias.
+        bias: whether to include a bias (i.e. make the layer affine rather than linear).
+        input_dim: dimensionality of the input (integer).
+            This argument (or alternatively, the keyword argument `input_shape`)
+            is required when using this layer as the first layer in a model.
+
+    # Input shape
+        ND tensor with arbitrary shape.
+
+    # Output shape
+        ND tensor with shape determined by input and arguments.
+    '''
+    def __init__(self, filters_simple,
+                 filters_complex,
+                 sum_axes,
+                 filter_axes,
+                 activation='relu',
+                 use_bias=True,
+                 kernel_initializer='glorot_uniform',
+                 bias_initializer='zeros',
+                 kernel_activation=None,
+                 kernel_regularizer=None,
+                 bias_regularizer=None,
+                 activity_regularizer=None,
+                 kernel_constraint=None,
+                 bias_constraint=None,
+                 **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+        super(FilterDimsV1, self).__init__(**kwargs)
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.bias_initializer = initializers.get(bias_initializer)
+        self.activation = activations.get(activation)
+        self.kernel_activation = activations.get(kernel_activation)
+        self.filters_simple = filters_simple
+        self.filters_complex = filters_complex
+        self.sum_axes = list(sum_axes)
+        self.sum_axes.sort()
+        self.filter_axes = list(filter_axes)
+        self.filter_axes.sort()
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.bias_regularizer = regularizers.get(bias_regularizer)
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+        self.kernel_constraint = kconstraints.UnitNormOrthogonal(self.filters_complex)
+        self.bias_constraint = constraints.get(bias_constraint)
+        self.use_bias = use_bias
+        self.input_spec = InputSpec(min_ndim=2)
+        self.supports_masking = True
+
+    def build(self, input_shape):
+        ndim = len(input_shape)
+        assert ndim >= 2
+
+        kernel_shape = [1] * (ndim - 1)
+        kernel_broadcast = [False] * (ndim - 1)
+        bias_broadcast = [True] * (ndim - 1)
+        for i in self.filter_axes:
+            kernel_shape[i-1] = input_shape[i]
+
+        kernel_shape.append(2 * self.filters_complex + self.filters_simple)
+        kernel_broadcast.append(False)
+        bias_broadcast.append(False)
+
+        for i in set(range(1, ndim)) - set(self.filter_axes):
+            kernel_broadcast[i-1] = True
+
+        kernel_shape = tuple(kernel_shape)
+        self.kernel = self.add_weight(kernel_shape,
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
+
+        if self.use_bias:
+            bias_shape = [1] * (ndim - 1)
+            for i in set(self.filter_axes) - set(self.sum_axes):
+                bias_shape[i-1] = input_shape[i]
+                bias_broadcast[i-1] = False
+
+            bias_shape.append(self.filters_complex + self.filters_simple)
+
+            bias_shape = tuple(bias_shape)
+            self.bias = self.add_weight(bias_shape,
+                                        initializer=self.kernel_initializer,
+                                        name='bias',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
+        else:
+            self.bias = None
+
+        self.kernel_broadcast = kernel_broadcast
+        self.bias_broadcast = bias_broadcast
+        self.built = True
+
+    def call(self, x, mask=None):
+        ndim = K.ndim(x)
+        xshape = K.shape(x)
+        W = self.kernel_activation(self.kernel)
+
+        if self.filter_axes == self.sum_axes:
+            ax1 = [a-1 for a in self.sum_axes]
+            ax1 = ax1 + list(set(range(ndim)) - set(ax1))
+            ax2 = list(set(range(ndim)) - set(self.sum_axes))
+            permute_dims = list(range(len(ax2)))
+            permute_dims.insert(self.sum_axes[0], len(ax2))
+            outdims = [-1] + [xshape[a] for a in ax2[1:]] + [self.filters_complex + self.filters_simple]
+            ax2 = ax2 + self.sum_axes
+            W = K.permute_dimensions(W, ax1)
+            W = K.reshape(W, (-1, 2 * self.filters_complex + self.filters_simple))
+            x = K.permute_dimensions(x, ax2)
+            x = K.reshape(x, (-1, K.shape(W)[0]))
+            output = K.dot(x, W)
+            output_complex = K.sqrt(K.square(output[:, :self.filters_complex]) + K.square(output[:, self.filters_complex:2*self.filters_complex]) + K.epsilon())
+            output_simple = output[:, 2*self.filters_complex:]
+            output = K.reshape(K.concatenate([output_complex, output_simple], axis=1), outdims)
+            if self.use_bias:
+                b_broadcast = [i for j, i in enumerate(self.bias_broadcast) if j not in self.sum_axes]
+                b = K.squeeze(self.bias, self.sum_axes[0])
+                if len(self.sum_axes) > 1:
+                    b = K.squeeze(b, self.sum_axes[1] - 1)
+                if len(self.sum_axes) > 2:
+                    b = K.squeeze(b, self.sum_axes[2] - 2)
+                if K.backend() == 'theano':
+                    output += K.pattern_broadcast(b, b_broadcast)
+                else:
+                    output += b
+            output = K.permute_dimensions(output, permute_dims)
+
+        else:
+            # bcast = list(np.where(self.broadcast)[0])
+            permute_dims = list(range(ndim + 1))
+            permute_dims[self.sum_axes[0]] = ndim
+            permute_dims[ndim] = self.sum_axes[0]
+
+            if K.backend() == 'theano':
+                output = K.sum(x[..., None] * K.pattern_broadcast(W, self.kernel_broadcast), axis=self.sum_axes, keepdims=True)
+            else:
+                output = K.sum(x[..., None] * W, axis=self.sum_axes, keepdims=True)
+
+            output_complex = K.sqrt(K.square(output[..., :self.filters_complex]) + K.square(output[..., self.filters_complex:2*self.filters_complex]) + K.epsilon())
+            output_simple = output[..., 2*self.filters_complex:]
+            output = K.concatenate([output_complex, output_simple], axis=-1)
+
+            if self.use_bias:
+                if K.backend() == 'theano':
+                    output += K.pattern_broadcast(self.bias, self.bias_broadcast)
+                else:
+                    output += self.bias
+            output = K.squeeze(K.permute_dimensions(output, permute_dims), ndim)
+            if len(self.sum_axes) > 1:
+                output = K.squeeze(output, self.sum_axes[1])
+
+        return self.activation(output)
+
+    def compute_output_shape(self, input_shape):
+
+        ndim = len(input_shape)
+        output_shape = [input_shape[0]] + [1] * (ndim-1)
+        for i in set(range(1, ndim)) - set(self.sum_axes):
+            output_shape[i] = input_shape[i]
+
+        output_shape.append(self.filters_complex + self.filters_simple)
+        permute_dims = list(range(ndim + 1))
+        permute_dims[self.sum_axes[0]] = ndim
+        permute_dims[ndim] = self.sum_axes[0]
+        output_shape = [output_shape[i] for i in permute_dims]
+        output_shape.pop(ndim)
+        if len(self.sum_axes) > 1:
+            output_shape.pop(self.sum_axes[1])
+
+
+        return tuple(output_shape)
+
+    def get_config(self):
+        config = {
+            'filters_simple': self.filters_simple,
+            'filters_complex': self.filters_complex,
+            'sum_axes': self.sum_axes,
+            'filter_axes': self.filter_axes,
+            'activation': activations.serialize(self.activation),
+            'kernel_activation': activations.serialize(self.kernel_activation),
+            'use_bias': self.use_bias,
+            'kernel_initializer': initializers.serialize(self.kernel_initializer),
+            'bias_initializer': initializers.serialize(self.kernel_initializer),
+            'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+            'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+            'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+            'kernel_constraint': constraints.serialize(self.kernel_constraint),
+            'bias_constraint': constraints.serialize(self.bias_constraint)
+        }
+        base_config = super(FilterDimsV1, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 
 class SoftMinMax(Layer):

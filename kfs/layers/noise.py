@@ -31,12 +31,13 @@ class CoupledGaussianDropout(Layer):
     def __init__(self, factor=1., **kwargs):
         super(CoupledGaussianDropout, self).__init__(**kwargs)
         self.supports_masking = True
-        self.factor = factor
+        self.factor = K.constant(factor)
+        self.epsilon = K.constant(K.epsilon())
 
     def call(self, inputs, training=None):
         def noised():
             stddev = K.stop_gradient(K.sqrt(K.clip(self.factor * K.abs(inputs),
-                                                   K.epsilon(), None)))
+                                                   self.epsilon, None)))
             return inputs + K.random_normal(shape=K.shape(inputs),
                                             mean=0.0,
                                             stddev=stddev)
