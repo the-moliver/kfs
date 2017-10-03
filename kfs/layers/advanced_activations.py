@@ -318,3 +318,109 @@ class Polynomial(Layer):
         config = {'init': self.init.__name__}
         base_config = super(Polynomial, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+class Hill(Layer):
+
+    def __init__(self, a_initializer='zeros',
+                 k_initializer='ones',
+                 n_initializer='ones',
+                 z_initializer='zeros',
+                 a_regularizer=None,
+                 a_constraint=constraints.NonNeg(),
+                 k_regularizer=None,
+                 k_constraint=constraints.NonNeg(),
+                 n_regularizer=None,
+                 n_constraint=constraints.NonNeg(),  
+                 z_regularizer=None,
+                 z_constraint=constraints.NonNeg(),
+                 shared_axes=None,
+                 **kwargs):
+        super(Hill, self).__init__(**kwargs)
+        self.supports_masking = True
+        self.a_initializer = initializers.get(a_initializer)
+        self.a_regularizer = regularizers.get(a_regularizer)
+        self.a_constraint = constraints.get(a_constraint)
+        self.k_initializer = initializers.get(a_initializer)
+        self.k_regularizer = regularizers.get(a_regularizer)
+        self.k_constraint = constraints.get(a_constraint)
+        self.n_initializer = initializers.get(a_initializer)
+        self.n_regularizer = regularizers.get(a_regularizer)
+        self.n_constraint = constraints.get(a_constraint)
+        self.z_initializer = initializers.get(a_initializer)
+        self.z_regularizer = regularizers.get(a_regularizer)
+        self.z_constraint = constraints.get(a_constraint)
+        if shared_axes is None:
+            self.shared_axes = None
+        elif not isinstance(shared_axes, (list, tuple)):
+            self.shared_axes = [shared_axes]
+        else:
+            self.shared_axes = list(shared_axes)
+
+    def build(self, input_shape):
+        param_shape = list(input_shape[1:])
+        self.param_broadcast = [False] * len(param_shape)
+        if self.shared_axes is not None:
+            for i in self.shared_axes:
+                param_shape[i - 1] = 1
+                self.param_broadcast[i - 1] = True
+        self.a = self.add_weight(shape=param_shape,
+                                     name='a',
+                                     initializer=self.a_initializer,
+                                     regularizer=self.a_regularizer,
+                                     constraint=self.a_constraint)
+        self.k = self.add_weight(shape=param_shape,
+                                     name='k',
+                                     initializer=self.k_initializer,
+                                     regularizer=self.k_regularizer,
+                                     constraint=self.k_constraint)
+        self.n = self.add_weight(shape=param_shape,
+                                     name='n',
+                                     initializer=self.n_initializer,
+                                     regularizer=self.n_regularizer,
+                                     constraint=self.n_constraint)
+        self.z = self.add_weight(shape=param_shape,
+                                     name='z',
+                                     initializer=self.z_initializer,
+                                     regularizer=self.z_regularizer,
+                                     constraint=self.z_constraint)
+        # Set input spec
+        axes = {}
+        if self.shared_axes:
+            for i in range(1, len(input_shape)):
+                if i not in self.shared_axes:
+                    axes[i] = input_shape[i]
+        self.input_spec = InputSpec(ndim=len(input_shape), axes=axes)
+        self.built = True
+
+    def call(self, inputs, mask=None):
+        if K.backend() == 'theano':
+            a = K.pattern_broadcast(self.a, self.param_broadcast)
+            k = K.pattern_broadcast(self.k, self.param_broadcast)
+            n = K.pattern_broadcast(self.n, self.param_broadcast)
+            z = K.pattern_broadcast(self.z, self.param_broadcast)
+        else:
+            a = self.a
+            k = self.k
+            n = self.n
+            z = self.z
+        return a / (K.pow((k / (inputs + 1e-5)), n) + z + 1e-5)
+
+    def get_config(self):
+        config = {
+            'a_initializer': initializers.serialize(self.a_initializer),
+            'a_regularizer': regularizers.serialize(self.a_regularizer),
+            'a_constraint': constraints.serialize(self.a_constraint),
+            'k_initializer': initializers.serialize(self.k_initializer),
+            'k_regularizer': regularizers.serialize(self.k_regularizer),
+            'k_constraint': constraints.serialize(self.k_constraint),
+            'n_initializer': initializers.serialize(self.n_initializer),
+            'n_regularizer': regularizers.serialize(self.n_regularizer),
+            'n_constraint': constraints.serialize(self.n_constraint),
+            'z_initializer': initializers.serialize(self.z_initializer),
+            'z_regularizer': regularizers.serialize(self.z_regularizer),
+            'z_constraint': constraints.serialize(self.z_constraint),
+            'shared_axes': self.shared_axes
+        }
+        base_config = super(Hill, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
