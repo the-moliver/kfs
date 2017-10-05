@@ -322,7 +322,7 @@ class Polynomial(Layer):
 
 class Hill(Layer):
 
-    def __init__(self, a_initializer='zeros',
+    def __init__(self, a_initializer='ones',
                  k_initializer='ones',
                  n_initializer='ones',
                  z_initializer='zeros',
@@ -335,6 +335,11 @@ class Hill(Layer):
                  z_regularizer=None,
                  z_constraint=constraints.NonNeg(),
                  shared_axes=None,
+                 a_shared=True,
+                 k_shared=True,
+                 n_shared=True,
+                 z_shared=True,
+                 z_one=False,
                  **kwargs):
         super(Hill, self).__init__(**kwargs)
         self.supports_masking = True
@@ -350,6 +355,11 @@ class Hill(Layer):
         self.z_initializer = initializers.get(a_initializer)
         self.z_regularizer = regularizers.get(a_regularizer)
         self.z_constraint = constraints.get(a_constraint)
+        self.a_shared = a_shared
+        self.k_shared = k_shared
+        self.n_shared = n_shared
+        self.z_shared = z_shared
+        self.z_one = z_one
         if shared_axes is None:
             self.shared_axes = None
         elif not isinstance(shared_axes, (list, tuple)):
@@ -358,32 +368,63 @@ class Hill(Layer):
             self.shared_axes = list(shared_axes)
 
     def build(self, input_shape):
-        param_shape = list(input_shape[1:])
-        self.param_broadcast = [False] * len(param_shape)
+        param_shape_unshared = list(input_shape[1:])
+        param_shape_shared = list(input_shape[1:])
+        param_broadcast_unshared = [False] * len(param_shape)
+        param_broadcast_shared = [False] * len(param_shape)
         if self.shared_axes is not None:
             for i in self.shared_axes:
-                param_shape[i - 1] = 1
-                self.param_broadcast[i - 1] = True
-        self.a = self.add_weight(shape=param_shape,
+                param_shape_shared[i - 1] = 1
+                param_broadcast_shared[i - 1] = True
+
+        self.a_param_broadcast = param_broadcast_shared
+        self.k_param_broadcast = param_broadcast_shared
+        self.n_param_broadcast = param_broadcast_shared
+        self.z_param_broadcast = param_broadcast_shared
+        a_param_shape = param_shape_shared
+        k_param_shape = param_shape_shared
+        n_param_shape = param_shape_shared
+        z_param_shape = param_shape_shared
+
+        if not self.a_shared:
+            a_param_shape = param_shape_unshared
+            self.a_param_broadcast = param_broadcast_unshared
+
+        if not self.k_shared:
+            k_param_shape = param_shape_unshared
+            self.k_param_broadcast = param_broadcast_unshared
+
+        if not self.n_shared:
+            n_param_shape = param_shape_unshared
+            self.n_param_broadcast = param_broadcast_unshared
+
+        if not self.z_shared:
+            z_param_shape = param_shape_unshared
+            self.z_param_broadcast = param_broadcast_unshared
+
+        self.a = self.add_weight(shape=a_param_shape,
                                      name='a',
                                      initializer=self.a_initializer,
                                      regularizer=self.a_regularizer,
                                      constraint=self.a_constraint)
-        self.k = self.add_weight(shape=param_shape,
+        self.k = self.add_weight(shape=k_param_shape,
                                      name='k',
                                      initializer=self.k_initializer,
                                      regularizer=self.k_regularizer,
                                      constraint=self.k_constraint)
-        self.n = self.add_weight(shape=param_shape,
+        self.n = self.add_weight(shape=n_param_shape,
                                      name='n',
                                      initializer=self.n_initializer,
                                      regularizer=self.n_regularizer,
                                      constraint=self.n_constraint)
-        self.z = self.add_weight(shape=param_shape,
-                                     name='z',
-                                     initializer=self.z_initializer,
-                                     regularizer=self.z_regularizer,
-                                     constraint=self.z_constraint)
+        if not self.z_one:
+            self.z = self.add_weight(shape=z_param_shape,
+                                         name='z',
+                                         initializer=self.z_initializer,
+                                         regularizer=self.z_regularizer,
+                                         constraint=self.z_constraint)
+        else:
+            self.z = K.constant(1.)
         # Set input spec
         axes = {}
         if self.shared_axes:
@@ -395,10 +436,10 @@ class Hill(Layer):
 
     def call(self, inputs, mask=None):
         if K.backend() == 'theano':
-            a = K.pattern_broadcast(self.a, self.param_broadcast)
-            k = K.pattern_broadcast(self.k, self.param_broadcast)
-            n = K.pattern_broadcast(self.n, self.param_broadcast)
-            z = K.pattern_broadcast(self.z, self.param_broadcast)
+            a = K.pattern_broadcast(self.a, self.a_param_broadcast)
+            k = K.pattern_broadcast(self.k, self.k_param_broadcast)
+            n = K.pattern_broadcast(self.n, self.n_param_broadcast)
+            z = K.pattern_broadcast(self.z, self.z_param_broadcast)
         else:
             a = self.a
             k = self.k
