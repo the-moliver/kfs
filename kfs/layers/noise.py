@@ -31,8 +31,8 @@ class CoupledGaussianDropout(Layer):
     def __init__(self, factor=1., **kwargs):
         super(CoupledGaussianDropout, self).__init__(**kwargs)
         self.supports_masking = True
-        self.factor = K.constant(factor)
-        self.epsilon = K.constant(K.epsilon())
+        self.factor = factor
+        self.epsilon = K.epsilon()
 
     def call(self, inputs, training=None):
         def noised():

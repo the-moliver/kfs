@@ -140,7 +140,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.spatial_kernel_size = spatial_kernel_size
         self.temporal_frequencies = temporal_frequencies
         self.temporal_frequencies_initial_max = np.float32(temporal_frequencies_initial_max)
-        self.temporal_frequencies_scaling = K.constant(np.float32(temporal_frequencies_scaling))
+        self.temporal_frequencies_scaling = np.float32(temporal_frequencies_scaling)
         self.spatial_kernel_initializer = initializers.get(spatial_kernel_initializer)
         self.temporal_kernel_initializer = initializers.get(temporal_kernel_initializer)
         self.temporal_frequencies_initializer = initializers.get(temporal_frequencies_initializer)
@@ -164,7 +164,7 @@ class Convolution2DEnergy_TemporalBasis(Layer):
         self.temporal_frequencies_constraint = constraints.get(temporal_frequencies_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
 
-        self.epsilon = K.constant(K.epsilon())
+        self.epsilon = K.epsilon()
 
         self.use_bias = use_bias
         self.input_spec = [InputSpec(ndim=5)]
@@ -1137,9 +1137,9 @@ class Convolution2DEnergy_Scatter(Layer):
                   'kernel_regularizer': self.kernel_regularizer.get_config() if self.kernel_regularizer else None,
                   'bias_regularizer': self.bias_regularizer.get_config() if self.bias_regularizer else None,
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
-                  'kernel_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+                  'kernel_constraint': self.kernel_constraint.get_config() if self.kernel_constraint else None,
                   'bias_constraint': self.bias_constraint.get_config() if self.bias_constraint else None,
-                  'use_bias': self.bias}
+                  'use_bias': self.use_bias}
         base_config = super(Convolution2DEnergy_Scatter, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 

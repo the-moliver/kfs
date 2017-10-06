@@ -370,8 +370,8 @@ class Hill(Layer):
     def build(self, input_shape):
         param_shape_unshared = list(input_shape[1:])
         param_shape_shared = list(input_shape[1:])
-        param_broadcast_unshared = [False] * len(param_shape)
-        param_broadcast_shared = [False] * len(param_shape)
+        param_broadcast_unshared = [False] * len(param_shape_unshared)
+        param_broadcast_shared = [False] * len(param_shape_shared)
         if self.shared_axes is not None:
             for i in self.shared_axes:
                 param_shape_shared[i - 1] = 1
