@@ -78,7 +78,7 @@ class GaussianReceptiveFields(Layer):
 
     def call(self, inputs):
         stim = inputs[0]
-        center = inputs[1][0]
+        center = inputs[1]
         centers_x = self.XX[None, :, :, None] - center[:, 0, None, None, None] - self.centers[0][None, None, None, :]
         centers_y = self.YY[None, :, :, None] - center[:, 1, None, None, None] - self.centers[1][None, None, None, :]
         senv = self.stds[None, None, None, :]
