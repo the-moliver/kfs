@@ -58,22 +58,22 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
     w_batch as size (100,)
 
     '''
-    index_array = np.arange(x.shape[0])
+    index_array = np.arange(x[0].shape[0])
     if type(delays) is int:
         delays = range(delays)
 
-    if conv3d:
-        tlist = [1, 2, 0] + list(range(3, np.ndim(x) + 1))
-    else:
-        tlist = [1, 0] + list(range(2, np.ndim(x) + 1))
-    batches = _make_batches(x.shape[0], batch_size)
+    if type(x) is not list:
+        x = list([x])
+
+    tlists = [[1, 0] + list(range(2, np.ndim(xx) + 1)) for xx in x]
+    batches = _make_batches(x[0].shape[0], batch_size)
     while 1:
         if shuffle:
             np.random.shuffle(index_array)
         for batch_index, (batch_start, batch_end) in enumerate(batches):
             batch_ids = index_array[batch_start:batch_end]
-            batch_ids_delay = [np.maximum(0, batch_ids - d) for d in delays]
-            x_batch = _standardize_input_data(x[batch_ids_delay, :].transpose(tlist), ['x_batch'])
+            batch_ids_delay = [np.minimum(np.maximum(0, batch_ids - d), x[0].shape[0]-1) for d in delays]
+            x_batch = _standardize_input_data([xx[batch_ids_delay, :].transpose(tt) for xx,tt in zip(x, tlists)], ['x_batch' + str(i) for i in range(1, len(x)+1)])
             if y is None:
                 yield x_batch
             else:
