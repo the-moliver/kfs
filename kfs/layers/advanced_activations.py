@@ -59,12 +59,12 @@ class ParametricSoftplus(Layer):
                 param_shape[i - 1] = 1
                 self.param_broadcast[i - 1] = True
 
-        self.alpha = self.add_weight(param_shape,
+        self.alpha = self.add_weight(shape=param_shape,
                                      name='alpha',
                                      initializer=self.alpha_initializer,
                                      regularizer=self.alpha_regularizer,
                                      constraint=self.alpha_constraint)
-        self.beta = self.add_weight(param_shape,
+        self.beta = self.add_weight(shape=param_shape,
                                      name='beta',
                                      initializer=self.beta_initializer,
                                      regularizer=self.beta_regularizer,
@@ -120,42 +120,91 @@ class PowerPReLU(Layer):
     # References
         - [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](http://arxiv.org/pdf/1502.01852v1.pdf)
     '''
-    def __init__(self, init='one', power_init=1, weights=None, axis=-1, fit=True, **kwargs):
-        self.supports_masking = True
-        self.init = initializations.get(init)
-        self.initial_weights = weights
+    def __init__(self, initial_power=1, axis=-1, **kwargs):
+        self.alpha_pos_initializer = initializers.constant(1.)
+        self.alpha_neg_initializer = initializers.constant(1.)
+        self.beta_pos_initializer = initializers.constant(0.)
+        self.beta_neg_initializer = initializers.constant(0.)
+        self.rho_pos_initializer = initializers.constant(initial_power)
+        self.rho_neg_initializer = initializers.constant(initial_power)
+
+        self.alpha_pos_constraint = None
+        self.alpha_neg_constraint = None
+        self.beta_pos_constraint = None
+        self.beta_neg_constraint = None
+        self.rho_pos_constraint = None
+        self.rho_neg_constraint = None
+
+        self.alpha_pos_regularizer = None
+        self.alpha_neg_regularizer = None
+        self.beta_pos_regularizer = None
+        self.beta_neg_regularizer = None
+        self.rho_pos_regularizer = None
+        self.rho_neg_regularizer = None
+
         self.axis = axis
-        self.power_init = power_init
-        self.fit = fit
         super(PowerPReLU, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        alpha_shape = input_shape[self.axis]
+        param_shape = input_shape[self.axis]
 
-        self.alpha_pos = self.init((alpha_shape,),
-                                name='{}alpha_pos'.format(self.name))
-        self.alpha_neg = self.init((alpha_shape,),
-                                name='{}alpha_neg'.format(self.name))
-        self.beta_pos = K.variable(np.zeros(alpha_shape),
-                                 name='{}beta_pos'.format(self.name))
-        self.beta_neg = K.variable(np.zeros(alpha_shape),
-                                 name='{}beta_neg'.format(self.name))
-        self.rho_pos = K.variable(self.power_init * np.ones(alpha_shape),
-                                 name='{}rho_pos'.format(self.name))
-        self.rho_neg = K.variable(self.power_init * np.ones(alpha_shape),
-                                 name='{}rho_neg'.format(self.name))
-        if self.fit:
-            self.trainable_weights = [self.alpha_pos, self.alpha_neg, self.beta_pos, self.beta_neg, self.rho_pos, self.rho_neg]
+                # self.alpha_pos = self.init((alpha_shape,),
+                #                         name='{}alpha_pos'.format(self.name))
+                # self.alpha_neg = self.init((alpha_shape,),
+                #                         name='{}alpha_neg'.format(self.name))
+                # self.beta_pos = K.variable(np.zeros(alpha_shape),
+                #                          name='{}beta_pos'.format(self.name))
+                # self.beta_neg = K.variable(np.zeros(alpha_shape),
+                #                          name='{}beta_neg'.format(self.name))
+                # self.rho_pos = K.variable(self.power_init * np.ones(alpha_shape),
+                #                          name='{}rho_pos'.format(self.name))
+                # self.rho_neg = K.variable(self.power_init * np.ones(alpha_shape),
+                #                          name='{}rho_neg'.format(self.name))
+
+        self.alpha_pos = self.add_weight(shape=param_shape,
+                                     name='alpha_pos',
+                                     initializer=self.alpha_pos_initializer,
+                                     regularizer=self.alpha_pos_regularizer,
+                                     constraint=self.alpha_pos_constraint)
+
+        self.alpha_neg = self.add_weight(shape=param_shape,
+                                     name='alpha_neg',
+                                     initializer=self.alpha_neg_initializer,
+                                     regularizer=self.alpha_neg_regularizer,
+                                     constraint=self.alpha_neg_constraint)
+
+        self.beta_pos = self.add_weight(shape=param_shape,
+                                     name='beta_pos',
+                                     initializer=self.beta_pos_initializer,
+                                     regularizer=self.beta_pos_regularizer,
+                                     constraint=self.beta_pos_constraint)
+
+        self.beta_neg = self.add_weight(shape=param_shape,
+                                     name='beta_neg',
+                                     initializer=self.beta_neg_initializer,
+                                     regularizer=self.beta_neg_regularizer,
+                                     constraint=self.beta_neg_constraint)
+
+        self.rho_pos = self.add_weight(shape=param_shape,
+                                     name='rho_pos',
+                                     initializer=self.rho_pos_initializer,
+                                     regularizer=self.rho_pos_regularizer,
+                                     constraint=self.rho_pos_constraint)
+
+        self.rho_neg = self.add_weight(shape=param_shape,
+                                     name='rho_neg',
+                                     initializer=self.rho_neg_initializer,
+                                     regularizer=self.rho_neg_regularizer,
+                                     constraint=self.rho_neg_constraint)
 
         self.input_spec = [InputSpec(dtype=K.floatx(),
                                      shape=input_shape)]
 
-        if self.initial_weights is not None:
-            self.set_weights(self.initial_weights)
-            del self.initial_weights
+        self.input_spec = InputSpec(ndim=len(input_shape))
+        self.built = True
 
     def call(self, x, mask=None):
-        input_shape = self.input_spec[0].shape
+        input_shape = K.int_shape(x)
         reduction_axes = list(range(len(input_shape)))
         del reduction_axes[self.axis]
         broadcast_shape = [1] * len(input_shape)
@@ -171,7 +220,28 @@ class PowerPReLU(Layer):
         return pos + neg
 
     def get_config(self):
-        config = {'init': self.init.__name__}
+        config = {
+                'alpha_pos_initializer': initializers.serialize(self.alpha_pos_initializer),
+                'alpha_neg_initializer': initializers.serialize(self.alpha_neg_initializer),
+                'beta_pos_initializer': initializers.serialize(self.beta_pos_initializer),
+                'beta_neg_initializer': initializers.serialize(self.beta_neg_initializer),
+                'rho_pos_initializer': initializers.serialize(self.rho_pos_initializer),
+                'rho_neg_initializer': initializers.serialize(self.rho_neg_initializer),
+
+                'alpha_pos_constraint': constraints.serialize(self.alpha_pos_constraint),
+                'alpha_neg_constraint': constraints.serialize(self.alpha_neg_constraint),
+                'beta_pos_constraint': constraints.serialize(self.beta_pos_constraint),
+                'beta_neg_constraint': constraints.serialize(self.beta_neg_constraint),
+                'rho_pos_constraint': constraints.serialize(self.rho_pos_constraint),
+                'rho_neg_constraint': constraints.serialize(self.rho_neg_constraint),
+
+                'alpha_pos_regularizer': regularizers.serialize(self.alpha_pos_regularizer),
+                'alpha_neg_regularizer': regularizers.serialize(self.alpha_neg_regularizer),
+                'beta_pos_regularizer': regularizers.serialize(self.beta_pos_regularizer),
+                'beta_neg_regularizer': regularizers.serialize(self.beta_neg_regularizer),
+                'rho_pos_regularizer': regularizers.serialize(self.rho_pos_regularizer),
+                'rho_neg_regularizer': regularizers.serialize(self.rho_neg_regularizer),
+        }
         base_config = super(PowerPReLU, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
@@ -210,9 +280,9 @@ class PowerReLU(Layer):
         alpha_shape = input_shape[self.axis]
 
         self.alpha = self.init((alpha_shape,),
-                                name='{}alpha_pos'.format(self.name))
+                                name='alpha_pos'.format(self.name))
         self.rho = K.variable(self.power_init * np.ones(alpha_shape),
-                                 name='{}rho_pos'.format(self.name))
+                                 name='rho_pos'.format(self.name))
 
         if self.fit:
             self.trainable_weights = [self.alpha, self.rho]

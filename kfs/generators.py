@@ -58,12 +58,13 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, c
     w_batch as size (100,)
 
     '''
-    index_array = np.arange(x[0].shape[0])
+
     if type(delays) is int:
         delays = range(delays)
 
     if type(x) is not list:
         x = list([x])
+    index_array = np.arange(x[0].shape[0])
 
     tlists = [[1, 0] + list(range(2, np.ndim(xx) + 1)) for xx in x]
     batches = _make_batches(x[0].shape[0], batch_size)

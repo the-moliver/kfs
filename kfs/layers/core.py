@@ -1268,7 +1268,7 @@ class Gram(Layer):
         else:
             d = -1
 
-        self.tril = K.constant(np.nonzero(np.tri(self.stack_size, self.stack_size, d).ravel())[0])
+        self.tril = np.nonzero(np.tri(self.stack_size, self.stack_size, d).ravel())[0]
 
         self.built = True
 
