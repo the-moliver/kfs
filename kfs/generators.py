@@ -36,7 +36,7 @@ def _make_batches_overlap(size, batch_size, overlap, filt_length):
 
 
 @threadsafe_generator
-def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True, conv3d=False):
+def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True):
     '''A generator to make it easy to fit time-delay regression models,
     i.e. a model where the value of y depends on past values of x
 
