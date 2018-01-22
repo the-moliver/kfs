@@ -1499,7 +1499,7 @@ class DenseDistance(Layer):
     def call(self, inputs):
         if self.metric is 'L1':
             return K.sum(K.abs(inputs[..., None] - self.kernel[None, ...]), axis=-2)
-        elif self.L2square
+        elif self.L2square:
             return K.sum(K.square(inputs[..., None] - self.kernel[None, ...]), axis=-2)
         else:
             return K.sqrt(K.maximum(K.sum(K.square(inputs[..., None] - self.kernel[None, ...]), axis=-2), K.epsilon()))
