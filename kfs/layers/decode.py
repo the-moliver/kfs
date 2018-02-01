@@ -6,7 +6,10 @@ import numpy as np
 
 from keras import backend as K
 from keras.engine import InputSpec, Layer
-from keras.layers.convolutional import conv_output_length
+from keras import initializers
+from keras import regularizers
+from keras import constraints
+# from keras.layers.convolutional import conv_output_length
 
 # Differentiable Preprocessing for fMRI
 
@@ -108,6 +111,63 @@ class TemporalFilter(Layer):
         base_config = super(TemporalFilter, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+class SpatioTemporalFilter(Layer):
+    '''TemporalFilter for fMRI
+    '''
+    def __init__(self, nb_simple, nb_complex, filter_delays, kernel_initializer='glorot_uniform', kernel_regularizer=None, kernel_constraint=None, **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+
+        self.nb_simple = nb_simple
+        self.nb_complex = nb_complex
+        self.filter_delays = filter_delays
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.kernel_constraint = constraints.get(kernel_constraint)
+
+        self.input_spec = [InputSpec(ndim=3)]
+        super(SpatioTemporalFilter, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.kernel = self.add_weight(shape=(self.filter_delays, 1, input_shape[-1], 2*self.nb_complex + self.nb_simple),
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
+
+        self.input_spec = InputSpec(ndim=3)
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+        length = input_shape[1] - self.filter_delays + 1
+        return (input_shape[0], length, self.nb_simple + self.nb_complex)
+
+    def call(self, x, mask=None):
+        x = K.permute_dimensions(x, (0, 2, 1))
+        x = K.expand_dims(x, -1)
+
+        conv_out = K.permute_dimensions(K.squeeze(K.conv2d(x, self.kernel), -1), (0, 2, 1))
+
+        conv_out_s = K.relu(conv_out[:,:,:self.nb_simple])
+
+        conv_out_c1 = conv_out[:,:,self.nb_simple:(self.nb_simple + self.nb_complex)]
+        conv_out_c2 = conv_out[:,:,(self.nb_simple + self.nb_complex):]
+
+        conv_out_c = K.sqrt(K.square(conv_out_c1) + K.square(conv_out_c2) + K.epsilon())
+        output = K.concatenate((conv_out_s, conv_out_c), axis=-1)
+
+        return output
+
+    def get_config(self):
+        config = {'nb_simple': self.nb_simple,
+                  'nb_complex': self.nb_complex,
+                  'filter_delays':self.filter_delays,
+                  'kernel_initializer': initializers.serialize(self.kernel_initializer),
+                  'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+                  'kernel_constraint': constraints.serialize(self.kernel_constraint)}
+        base_config = super(SpatioTemporalFilter, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 class Rescale(Layer):
     '''Apply z-score scaling used in fits
@@ -117,33 +177,27 @@ class Rescale(Layer):
 
         self.means = means
         self.stds = stds
-        self.input_spec = [InputSpec(ndim=2)]
+        self.input_spec = [InputSpec(min_ndim=2)]
 
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
         super(Rescale, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        assert len(input_shape) == 2
-        input_dim = input_shape[1]
-        self.output_dim = input_dim
-        self.input_spec = [InputSpec(dtype=K.floatx(),
-                                     shape=(None, input_dim))]
-
         self.means = K.variable(self.means,
                                 name='{}_means'.format(self.name))
         self.stds = K.variable(self.stds,
                                name='{}_stds'.format(self.name))
+        self.built = True
 
     def call(self, x, mask=None):
         return (x - self.means)/self.stds
 
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 2
-        return (input_shape[0], input_shape[1])
+    def compute_output_shape(self, input_shape):
+        return input_shape
 
     def get_config(self):
-        config = {'output_dim': self.output_dim,
-                  'input_dim': self.input_dim}
+        config = {'means': self.means,
+                  'stds': self.stds}
         base_config = super(Rescale, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))

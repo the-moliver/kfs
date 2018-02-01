@@ -44,9 +44,13 @@ class UnitNormOrthogonal(Constraint):
 
         v2 = w - v*K.sum(v*w, axis=sumaxes, keepdims=True)/K.sum(v*v, axis=sumaxes, keepdims=True)
 
-        norms_paired = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
-        v /= norms_paired
-        v2 /= norms_paired
+        # norms_paired = K.sqrt(K.sum(v**2 + v2**2, axis=sumaxes, keepdims=True))
+        # v /= norms_paired
+        # v2 /= norms_paired
+        norms_v = K.sqrt(K.sum(v**2, axis=sumaxes, keepdims=True))
+        v /= norms_v
+        norms_v2 = K.sqrt(K.sum(v2**2, axis=sumaxes, keepdims=True))
+        v2 /= norms_v2
 
         if self.singles:
             if self.interleave:

@@ -27,6 +27,171 @@ def step_init2(params):
     steps = params[1]*(np.arange(0, 2+step, step)[:params[0]] - 1.)
     return np.tile(steps, [params[2], 1])
 
+
+
+class SimpleDirectionSelective(Layer):
+
+    def __init__(self, num_neurons,
+                 spatial_kernel_initializer='glorot_uniform',
+                 temporal_kernel_initializer='glorot_uniform',
+                 temporal_frequencies_scaling=1,
+                 bias_initializer='zeros',
+                 spatial_kernel_regularizer=None,
+                 temporal_kernel_regularizer=None,
+                 temporal_frequencies_regularizer=None,
+                 bias_regularizer=None,
+                 activity_regularizer=None,
+                 spatial_kernel_constraint=None,
+                 temporal_kernel_constraint=None,
+                 temporal_frequencies_constraint=None,
+                 bias_constraint=None,
+                 use_bias=True, 
+                 activation=None, **kwargs):
+
+        self.num_neurons = num_neurons
+        self.temporal_frequencies_scaling = np.float32(temporal_frequencies_scaling)
+        self.spatial_kernel_initializer = initializers.get(spatial_kernel_initializer)
+        self.temporal_kernel_initializer = initializers.get(temporal_kernel_initializer)
+        self.bias_initializer = initializers.get(bias_initializer)
+        self.activation = activations.get(activation)
+
+
+        self.spatial_kernel_regularizer = regularizers.get(spatial_kernel_regularizer)
+        self.temporal_kernel_regularizer = regularizers.get(temporal_kernel_regularizer)
+        self.temporal_frequencies_regularizer = regularizers.get(temporal_frequencies_regularizer)
+        self.bias_regularizer = regularizers.get(bias_regularizer)
+        self.activity_regularizer = regularizers.get(activity_regularizer)
+
+        self.spatial_kernel_constraint = constraints.get(spatial_kernel_constraint)
+        self.temporal_kernel_constraint = constraints.get(temporal_kernel_constraint)
+        self.temporal_frequencies_constraint = constraints.get(temporal_frequencies_constraint)
+        self.bias_constraint = constraints.get(bias_constraint)
+
+        self.epsilon = K.epsilon()
+
+        self.use_bias = use_bias
+        self.input_spec = [InputSpec(ndim=4)]
+
+        super(SimpleDirectionSelective, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+
+
+        self.delays = input_shape[1]
+
+
+        self.spatial_kernel = self.add_weight(tuple(input_shape[-2:]) + (2*self.num_neurons,),
+                                              initializer=self.spatial_kernel_initializer,
+                                              name='spatial_kernel',
+                                              regularizer=self.spatial_kernel_regularizer,
+                                              constraint=self.spatial_kernel_constraint)
+
+        self.temporal_kernel = self.add_weight((self.delays, self.num_neurons),
+                                               initializer=self.temporal_kernel_initializer,
+                                               name='temporal_kernel',
+                                               regularizer=self.temporal_kernel_regularizer,
+                                               constraint=self.temporal_kernel_constraint)
+
+        if self.use_bias:
+            self.bias = self.add_weight((self.num_neurons,),
+                                        initializer=self.bias_initializer,
+                                        name='bias',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
+        else:
+            self.bias = None
+
+        self.temporal_freqs = self.add_weight((self.num_neurons,),
+                                              initializer='ones',
+                                              name='temporal_frequency',
+                                              regularizer=self.temporal_frequencies_regularizer,
+                                              constraint=self.temporal_frequencies_constraint)
+
+        self.delays_pi = K.pattern_broadcast(K.constant(2 * np.pi * np.arange(0, 1 + 1. / (self.delays - 1), 1. / (self.delays - 1))[:self.delays][:, None], name='delays_pi'), [False, True])
+
+        # self.WT = K.zeros((4*self.delays, 3*self.filters_temporal*self.temporal_frequencies))
+
+        # Set input spec.
+        self.input_spec = InputSpec(ndim=4)
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+
+        return (input_shape[0], self.num_neurons)
+
+
+    def call(self, inputs):
+        xshape = K.shape(inputs)
+        inputs = K.reshape(inputs, (-1, xshape[2]*xshape[3]))
+
+        tfs = self.temporal_frequencies_scaling*self.delays_pi*self.temporal_freqs[None,...]
+
+        sin_step = K.sin(tfs)*self.temporal_kernel
+        cos_step = K.cos(tfs)*self.temporal_kernel
+
+        w0t = K.concatenate((cos_step, -sin_step), axis=0)
+
+        W = K.reshape(self.spatial_kernel, (-1, 2*self.num_neurons))
+
+        out = K.dot(inputs, W)
+
+        out = K.reshape(K.permute_dimensions(K.reshape(out, (-1, self.delays, 2, self.num_neurons)), (0, 2, 1, 3)), (-1, 2*self.delays, self.num_neurons))
+
+        out = K.sum(out * w0t[None,...], axis=1)
+
+
+        if self.bias:
+            out += self.bias
+
+        out = self.activation(out)
+        return out
+
+    def get_config(self):
+        config = {'num_neurons': self.num_neurons,
+                  'temporal_frequencies_scaling': self.temporal_frequencies_scaling,
+                  'activation': activations.serialize(self.activation),
+                  'use_bias': self.use_bias,
+                  'spatial_kernel_initializer': initializers.serialize(self.spatial_kernel_initializer),
+                  'temporal_kernel_initializer': initializers.serialize(self.temporal_kernel_initializer),
+                  'temporal_frequencies_initializer': initializers.serialize(self.temporal_frequencies_initializer),
+                  'bias_initializer': initializers.serialize(self.bias_initializer),
+                  'spatial_kernel_regularizer': regularizers.serialize(self.spatial_kernel_regularizer),
+                  'temporal_kernel_regularizer': regularizers.serialize(self.temporal_kernel_regularizer),
+                  'temporal_frequencies_regularizer': regularizers.serialize(self.temporal_frequencies_regularizer),
+                  'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+                  'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+                  'spatial_kernel_constraint': constraints.serialize(self.spatial_kernel_constraint),
+                  'temporal_kernel_constraint': constraints.serialize(self.temporal_kernel_constraint),
+                  'temporal_frequencies_constraint': constraints.serialize(self.temporal_frequencies_constraint),
+                  'bias_constraint': constraints.serialize(self.bias_constraint)
+                  }
+        base_config = super(SimpleDirectionSelective, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class OnOffSplit(Layer):
+
+    def __init__(self, **kwargs):
+        super(OnOffSplit, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        # Create a trainable weight variable for this layer.
+        self.split = self.add_weight(name='split', 
+                                      shape=(1,),
+                                      initializer='zeros',
+                                      trainable=True)
+        super(OnOffSplit, self).build(input_shape)  # Be sure to call this somewhere!
+
+    def call(self, x):
+        x -= self.split[0]
+        pos = K.relu(x)
+        neg = K.relu(-x)
+        return K.concatenate([pos[:,:,None,...], neg[:,:,None,...]], axis=2)
+
+    def compute_output_shape(self, input_shape):
+        shape = list(input_shape)[:2] + [2] + list(input_shape)[2:]
+        return tuple(shape)
+
 class Convolution2DEnergy_TemporalBasis_GaussianRF(Layer):
     """Convolution operator for filtering windows of time varying
     two-dimensional inputs, such as a series of movie frames, with

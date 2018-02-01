@@ -28,8 +28,8 @@ class ParametricSoftplus(Layer):
     # References:
         - [Inferring Nonlinear Neuronal Computation Based on Physiologically Plausible Inputs](http://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1003143)
     '''
-    def __init__(self, alpha_initializer=0.2,
-                 beta_initializer=5.0,
+    def __init__(self, alpha_initializer=initializers.constant(0.2),
+                 beta_initializer=initializers.constant(5.0),
                  alpha_regularizer=None,
                  alpha_constraint=None,
                  beta_regularizer=None,
@@ -96,6 +96,83 @@ class ParametricSoftplus(Layer):
             'shared_axes': self.shared_axes
         }
         base_config = super(ParametricSoftplus, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class ParametricSoftplusAlpha(Layer):
+    '''Parametric Softplus of the form: alpha * log(1 + exp(beta * X))
+
+    # Input shape
+        Arbitrary. Use the keyword argument `input_shape`
+        (tuple of integers, does not include the samples axis)
+        when using this layer as the first layer in a model.
+
+    # Output shape
+        Same shape as the input.
+
+    # Arguments
+        alpha_init: float. Initial value of the alpha weights.
+        beta_init: float. Initial values of the beta weights.
+        weights: initial weights, as a list of 2 numpy arrays.
+
+    # References:
+        - [Inferring Nonlinear Neuronal Computation Based on Physiologically Plausible Inputs](http://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1003143)
+    '''
+    def __init__(self, alpha_initializer=initializers.constant(10.),
+                 alpha_regularizer=None,
+                 alpha_constraint=None,
+                 shared_axes=None,
+                 **kwargs):
+        super(ParametricSoftplusAlpha, self).__init__(**kwargs)
+        self.supports_masking = True
+        self.alpha_initializer = initializers.get(alpha_initializer)
+        self.alpha_regularizer = regularizers.get(alpha_regularizer)
+        self.alpha_constraint = constraints.get(alpha_constraint)
+
+        if shared_axes is None:
+            self.shared_axes = None
+        elif not isinstance(shared_axes, (list, tuple)):
+            self.shared_axes = [shared_axes]
+        else:
+            self.shared_axes = list(shared_axes)
+
+    def build(self, input_shape):
+        param_shape = list(input_shape[1:])
+        self.param_broadcast = [False] * len(param_shape)
+        if self.shared_axes is not None:
+            for i in self.shared_axes:
+                param_shape[i - 1] = 1
+                self.param_broadcast[i - 1] = True
+
+        self.alpha = self.add_weight(shape=param_shape,
+                                     name='alpha',
+                                     initializer=self.alpha_initializer,
+                                     regularizer=self.alpha_regularizer,
+                                     constraint=self.alpha_constraint)
+
+        # Set input spec
+        axes = {}
+        if self.shared_axes:
+            for i in range(1, len(input_shape)):
+                if i not in self.shared_axes:
+                    axes[i] = input_shape[i]
+        self.input_spec = InputSpec(ndim=len(input_shape), axes=axes)
+        self.built = True
+
+    def call(self, x, mask=None):
+        if K.backend() == 'theano':
+            return K.softplus(K.pattern_broadcast(self.alpha, self.param_broadcast) * x) / K.pattern_broadcast(self.alpha, self.param_broadcast)
+        else:
+            return K.softplus(self.alpha * x) / self.alpha
+
+    def get_config(self):
+        config = {
+            'alpha_initializer': initializers.serialize(self.alpha_initializer),
+            'alpha_regularizer': regularizers.serialize(self.alpha_regularizer),
+            'alpha_constraint': constraints.serialize(self.alpha_constraint),
+            'shared_axes': self.shared_axes
+        }
+        base_config = super(ParametricSoftplusAlpha, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
@@ -534,4 +611,44 @@ class Hill(Layer):
             'shared_axes': self.shared_axes
         }
         base_config = super(Hill, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class RReLU(Layer):
+    '''Randomized Leaky Rectified Linear Unit
+    that uses a random alpha in training while using the average of alphas
+    in testing phase:
+    During training
+    `f(x) = alpha * x for x < 0, where alpha ~ U(l, u), l < u`,
+    `f(x) = x for x >= 0`.
+    During testing:
+    `f(x) = (l + u) / 2 * x for x < 0`,
+    `f(x) = x for x >= 0`.
+    # Input shape
+        Arbitrary. Use the keyword argument `input_shape`
+        (tuple of integers, does not include the samples axis)
+        when using this layer as the first layer in a model.
+    # Output shape
+        Same shape as the input.
+    # Arguments
+        l: lower bound of the uniform distribution, default is 1/8
+        u: upper bound of the uniform distribution, default is 1/3
+    # References
+        - [Empirical Evaluation of Rectified Activations in Convolution Network](https://arxiv.org/pdf/1505.00853v2.pdf)
+    '''
+    def __init__(self, l=1/8., u=1/3., **kwargs):
+        self.supports_masking = True
+        self.l = l
+        self.u = u
+        self.average = (l + u) / 2
+        self.uses_learning_phase = True
+        super(RReLU, self).__init__(**kwargs)
+
+    def call(self, x, mask=None):
+        return K.in_train_phase(K.relu(x, K.random_uniform(K.shape(x), self.l, self.u)),
+                                K.relu(x, self.average))
+
+    def get_config(self):
+        config = {'l': self.l, 'u': self.u}
+        base_config = super(RReLU, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
