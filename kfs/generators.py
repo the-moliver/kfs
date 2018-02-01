@@ -88,6 +88,69 @@ def time_delay_generator(x, y, delays, batch_size, weights=None, shuffle=True):
                 yield (x_batch, y_batch, w_batch)
 
 
+@threadsafe_generator
+def time_delay_generator2(x, y, temporal_window, delays, batch_size, weights=None, shuffle=True):
+    '''A generator to make it easy to fit time-delay regression models,
+    i.e. a model where the value of y depends on past values of x
+
+    # Arguments
+    x: input data, as a Numpy array
+    y: targets, as a Numpy array or None for prediction generation
+    delays: number of time-steps to include in model
+    weights: Numpy array of weights for the samples
+    shuffle: Whether or not to shuffle the data (set True for training)
+
+    # Example
+    if X_train is (1000,200), Y_train is (1000,1)
+    train_gen = time_delay_generator(X_train, Y_train, delays=10, batch_size=100)
+
+    train_gen is a generator that gives:
+    x_batch as size (100,10,200) since each of the 100 samples includes the input
+    data at the current and nine previous time steps
+    y_batch as size (100,1)
+    w_batch as size (100,)
+
+    '''
+
+
+
+
+
+    x = np.concatenate([np.zeros((temporal_window/2,) + x.shape[1:]), x, np.zeros((temporal_window/2,) + x.shape[1:])], axis=0)
+
+    if type(x) is not list:
+        x = list([x])
+    index_array = np.arange(x[0].shape[0])
+
+    tlists = [[1, 0] + list(range(2, np.ndim(xx) + 1)) for xx in x]
+    batches = _make_batches(x[0].shape[0], batch_size)
+    batches = batches[temporal_window-1:]
+
+    if type(delays) is not int:
+        delays = len(delays)
+
+    delays = range(delays + temporal_window - 1)
+    
+    while 1:
+        if shuffle:
+            np.random.shuffle(index_array)
+        for batch_index, (batch_start, batch_end) in enumerate(batches):
+            batch_ids = index_array[batch_start:batch_end]
+            batch_ids_delay = [np.minimum(np.maximum(0, batch_ids - d), x[0].shape[0]-1) for d in delays]
+            x_batch = _standardize_input_data([xx[batch_ids_delay, :].transpose(tt) for xx,tt in zip(x, tlists)], ['x_batch' + str(i) for i in range(1, len(x)+1)])
+            if y is None:
+                yield x_batch
+            else:
+                y_batch = _standardize_input_data(y[batch_ids, :], ['y_batch'])
+                if weights is not None:
+                    w_batch = weights[batch_ids, :][:, 0]
+                else:
+                    w_batch = np.ones(x_batch[0].shape[0])
+                w_batch[batch_ids < delays[-1]] = 0.
+                w_batch = _standardize_sample_weights(w_batch, ['w_batch'])
+                yield (x_batch, y_batch, w_batch)
+
+
 def time_delay_generator_AE(x, delays, batch_size, shuffle=True, conv3d=False):
     '''A generator to make it easy to fit time-delay regression models,
     i.e. a model where the value of y depends on past values of x
