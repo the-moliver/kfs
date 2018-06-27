@@ -111,6 +111,103 @@ class TemporalFilter(Layer):
         base_config = super(TemporalFilter, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+
+class SpatioTemporalFilterSimple(Layer):
+    '''TemporalFilter for fMRI
+    '''
+    def __init__(self, nb_simple, filter_delays, kernel_initializer='glorot_uniform', kernel_regularizer=None, kernel_constraint=None, **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+
+        self.nb_simple = nb_simple
+        self.filter_delays = filter_delays
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.kernel_constraint = constraints.get(kernel_constraint)
+
+        self.input_spec = [InputSpec(ndim=3)]
+        super(SpatioTemporalFilterSimple, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.kernel = self.add_weight(shape=(self.filter_delays, 1, input_shape[-1], self.nb_simple),
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
+
+        self.input_spec = InputSpec(ndim=3)
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+        length = input_shape[1] - self.filter_delays + 1
+        return (input_shape[0], length, self.nb_simple)
+
+    def call(self, x, mask=None):
+        x = K.permute_dimensions(x, (0, 2, 1))
+        x = K.expand_dims(x, -1)
+
+        output = K.permute_dimensions(K.squeeze(K.conv2d(x, self.kernel), -1), (0, 2, 1))
+
+        return output
+
+    def get_config(self):
+        config = {'nb_simple': self.nb_simple,
+                  'filter_delays':self.filter_delays,
+                  'kernel_initializer': initializers.serialize(self.kernel_initializer),
+                  'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+                  'kernel_constraint': constraints.serialize(self.kernel_constraint)}
+        base_config = super(SpatioTemporalFilterSimple, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class SpatioTemporalFilterComplex(Layer):
+    '''TemporalFilter for fMRI
+    '''
+    def __init__(self, nb_complex, filter_delays, kernel_initializer='glorot_uniform', kernel_regularizer=None, kernel_constraint=None, **kwargs):
+        if 'input_shape' not in kwargs and 'input_dim' in kwargs:
+            kwargs['input_shape'] = (kwargs.pop('input_dim'),)
+
+        self.nb_complex = nb_complex
+        self.filter_delays = filter_delays
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.kernel_constraint = constraints.get(kernel_constraint)
+
+        self.input_spec = [InputSpec(ndim=3)]
+        super(SpatioTemporalFilterComplex, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.kernel = self.add_weight(shape=(self.filter_delays, 1, input_shape[-1], self.nb_complex),
+                                      initializer=self.kernel_initializer,
+                                      name='kernel',
+                                      regularizer=self.kernel_regularizer,
+                                      constraint=self.kernel_constraint)
+
+        self.input_spec = InputSpec(ndim=3)
+        self.built = True
+
+    def compute_output_shape(self, input_shape):
+        length = input_shape[1] - self.filter_delays + 1
+        return (input_shape[0], length, self.nb_complex)
+
+    def call(self, x, mask=None):
+        x = K.permute_dimensions(x, (0, 2, 1))
+        x = K.expand_dims(x, -1)
+
+        output = K.square(K.permute_dimensions(K.squeeze(K.conv2d(x, self.kernel), -1), (0, 2, 1)))
+
+        return output
+
+    def get_config(self):
+        config = {'nb_complex': self.nb_complex,
+                  'filter_delays':self.filter_delays,
+                  'kernel_initializer': initializers.serialize(self.kernel_initializer),
+                  'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+                  'kernel_constraint': constraints.serialize(self.kernel_constraint)}
+        base_config = super(SpatioTemporalFilterComplex, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
 class SpatioTemporalFilter(Layer):
     '''TemporalFilter for fMRI
     '''
@@ -129,7 +226,7 @@ class SpatioTemporalFilter(Layer):
         super(SpatioTemporalFilter, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.kernel = self.add_weight(shape=(self.filter_delays, 1, input_shape[-1], 2*self.nb_complex + self.nb_simple),
+        self.kernel = self.add_weight(shape=(self.filter_delays, 1, input_shape[-1], self.nb_complex + self.nb_simple),
                                       initializer=self.kernel_initializer,
                                       name='kernel',
                                       regularizer=self.kernel_regularizer,
@@ -148,12 +245,10 @@ class SpatioTemporalFilter(Layer):
 
         conv_out = K.permute_dimensions(K.squeeze(K.conv2d(x, self.kernel), -1), (0, 2, 1))
 
-        conv_out_s = K.relu(conv_out[:,:,:self.nb_simple])
+        conv_out_s = conv_out[:,:,:self.nb_simple]
 
-        conv_out_c1 = conv_out[:,:,self.nb_simple:(self.nb_simple + self.nb_complex)]
-        conv_out_c2 = conv_out[:,:,(self.nb_simple + self.nb_complex):]
+        conv_out_c = K.square(conv_out[:,:,self.nb_simple:])
 
-        conv_out_c = K.sqrt(K.square(conv_out_c1) + K.square(conv_out_c2) + K.epsilon())
         output = K.concatenate((conv_out_s, conv_out_c), axis=-1)
 
         return output

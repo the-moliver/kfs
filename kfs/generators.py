@@ -112,10 +112,6 @@ def time_delay_generator2(x, y, temporal_window, delays, batch_size, weights=Non
 
     '''
 
-
-
-
-
     x = np.concatenate([np.zeros((temporal_window/2,) + x.shape[1:]), x, np.zeros((temporal_window/2,) + x.shape[1:])], axis=0)
 
     if type(x) is not list:
@@ -130,7 +126,7 @@ def time_delay_generator2(x, y, temporal_window, delays, batch_size, weights=Non
         delays = len(delays)
 
     delays = range(delays + temporal_window - 1)
-    
+
     while 1:
         if shuffle:
             np.random.shuffle(index_array)
